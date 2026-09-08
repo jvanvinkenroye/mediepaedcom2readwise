@@ -1,0 +1,23 @@
+services:
+  medienpaed-reader:
+    build: .
+    image: medienpaed-reader:0.1.0
+    container_name: medienpaed-reader
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    ports:
+      - "8080:8080"
+    volumes:
+      - medienpaed-data:/data
+    mem_limit: 4g
+    cpus: 2.0
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  medienpaed-data:

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="{{ record.language or 'de' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ record.title }}</title>
+  <meta name="citation_title" content="{{ record.title }}">
+  {% for author in record.authors %}<meta name="citation_author" content="{{ author }}">
+  {% endfor %}{% if record.published %}<meta name="citation_publication_date" content="{{ record.published }}">{% endif %}
+  {% if record.doi %}<meta name="citation_doi" content="{{ record.doi }}">{% endif %}
+  <meta name="author" content="{{ record.authors | join(', ') }}">
+  <style>
+    body { max-width: 46rem; margin: 2rem auto; padding: 0 1rem; font: 1.05rem/1.6 Georgia, serif; color: #222; }
+    header { border-bottom: 1px solid #ccc; margin-bottom: 2rem; padding-bottom: 1rem; font-family: system-ui, sans-serif; font-size: 0.9rem; color: #555; }
+    header h1 { font: 700 1.6rem/1.25 Georgia, serif; color: #111; margin: 0 0 0.5rem; }
+    table { border-collapse: collapse; margin: 1rem 0; }
+    td, th { border: 1px solid #bbb; padding: 0.3rem 0.5rem; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>{{ record.title }}</h1>
+  <p>{{ record.authors | join(', ') }}{% if record.published %} · {{ record.published }}{% endif %}</p>
+  <p>
+    <a href="{{ record.landing_url }}">Artikelseite</a>
+    {% if record.doi_url %} · <a href="{{ record.doi_url }}">DOI {{ record.doi }}</a>{% endif %}
+    {% if record.pdf_url %} · <a href="{{ record.pdf_url }}">PDF</a>{% endif %}
+    · MedienPädagogik, CC BY 4.0
+  </p>
+</header>
+<article>
+{{ body | safe }}
+</article>
+</body>
+</html>
