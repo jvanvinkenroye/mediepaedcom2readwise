@@ -4,13 +4,10 @@ FROM python:3.12.11-slim-bookworm AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.8.17 /uv /uvx /bin/
 
+# CPU-only torch kommt ueber [tool.uv.sources] in pyproject.toml
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_PROJECT_ENVIRONMENT=/app/.venv \
-    # CPU-only torch spart mehrere GB gegenueber dem CUDA-Default
-    UV_INDEX_URL=https://pypi.org/simple \
-    UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu \
-    UV_INDEX_STRATEGY=unsafe-best-match
+    UV_PROJECT_ENVIRONMENT=/app/.venv
 
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
