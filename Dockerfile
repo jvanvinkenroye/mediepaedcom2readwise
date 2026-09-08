@@ -20,6 +20,12 @@ RUN /app/.venv/bin/docling-tools models download layout tableformer -o /models
 # Stage 2: schlankes Laufzeit-Image
 FROM python:3.12.11-slim-bookworm AS runtime
 
+# opencv (Dependency von docling) braucht diese Systembibliotheken auch ohne Display
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgl1 libglib2.0-0 libxcb1 libsm6 libxext6 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system --gid 1000 app \
     && useradd --system --uid 1000 --gid app --home /app --shell /usr/sbin/nologin app \
     && mkdir -p /data && chown app:app /data

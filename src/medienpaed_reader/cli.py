@@ -120,7 +120,10 @@ def serve(
                     pipeline.run_once(settings, store, converter=converter)
                 except Exception:  # noqa: BLE001 - Poller darf nicht sterben
                     log.exception("Poll-Durchlauf fehlgeschlagen")
-                time.sleep(settings.poll_interval_seconds)
+                # Solange Artikel ausstehen (z. B. Backlog beim Erststart), nur kurz
+                # warten statt das volle Intervall.
+                backlog = bool(store.pending(limit=1))
+                time.sleep(60 if backlog else settings.poll_interval_seconds)
 
         threading.Thread(target=poll_loop, name="poller", daemon=True).start()
 
