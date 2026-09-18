@@ -132,8 +132,10 @@ def push_unpushed(settings: Settings, store: Store, dry_run: bool = False) -> in
                 record.title,
             )
             continue
+        # Reader zeigt die Domain der URL als Quelle an; mit dem DOI-Link stuende
+        # dort "doi.org". Die Artikelseite ist ebenso eindeutig fuer die Deduplizierung.
         rw.save_html(
-            url=record.doi_url or record.landing_url,
+            url=record.landing_url,
             html=wrap_html(record, source, html),
             title=record.title,
             author=", ".join(record.authors) or None,
