@@ -62,9 +62,11 @@ flowchart TD
     PUSH -->|"201 neu / 200 Duplikat"| API
     PUSH -->|readwise_pushed_at| DB
 
-    classDef quelle fill:#eef,stroke:#66a
-    classDef ziel fill:#efe,stroke:#6a6
-    classDef store fill:#ffe,stroke:#aa6
+    classDef quelle fill:#cfd8ff,stroke:#3b5bdb,color:#111
+    classDef ziel fill:#c8f0d0,stroke:#2b8a3e,color:#111
+    classDef store fill:#ffe8a3,stroke:#b8860b,color:#111
+    classDef step fill:#f1f3f5,stroke:#868e96,color:#111
+    class POLL,DISC,META,WAHL,DL,DOC,CLEAN,WEB,PUSH step
     class RSS,SEITE,PDF quelle
     class FEEDABO,API ziel
     class DB,FS store
