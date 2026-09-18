@@ -1,7 +1,11 @@
 import pytest
 
 from medienpaed_reader.feed_source import parse_feed, url_article_id
-from medienpaed_reader.web_extract import extract_article
+from medienpaed_reader.web_extract import (
+    extract_article,
+    replace_consent_embeds,
+    strip_consent_text,
+)
 
 # trafilatura entfernt wiederholte Absaetze, deshalb vier verschiedene.
 PARAGRAPHS = "".join(
@@ -68,3 +72,47 @@ def test_parse_feed_web_type_uses_url_ids() -> None:
     assert entries[0].article_id == url_article_id("https://example.org/news/a")
     # Als OJS-Quelle gelesen liefert der Feed nichts: keine /article/view/-IDs.
     assert parse_feed(xml, "ojs") == []
+
+
+OPT_IN_VIDEO = """<a-opt-in checkbox-text="YouTube-Video immer laden" type="Youtube">
+<div><h2 class="opt-in__title">Empfohlener redaktioneller Inhalt</h2>
+<p>Mit Ihrer Zustimmung wird hier ein externes YouTube-Video
+(Google Ireland Limited) geladen.</p>
+<button>YouTube-Video jetzt laden</button>
+<p>Ich bin damit einverstanden, dass mir externe Inhalte angezeigt werden.</p></div>
+<noscript><figure><a-iframe class="video__iframe" needs-consent
+ src="//www.youtube-nocookie.com/embed/UIxUUwfWhVo"
+ title="YouTube video player"></a-iframe>
+</figure></noscript></a-opt-in>"""
+
+OPT_IN_WIDGET = """<a-opt-in type="Preisvergleich">
+<h2>Empfohlener redaktioneller Inhalt</h2>
+<p>Mit Ihrer Zustimmung wird hier ein externer Preisvergleich geladen.</p></a-opt-in>"""
+
+
+def test_replace_consent_embeds_links_video_and_drops_widgets() -> None:
+    html = f"<p>Vorher</p>{OPT_IN_VIDEO}<p>Mitte</p>{OPT_IN_WIDGET}<p>Nachher</p>"
+    result = replace_consent_embeds(html)
+    assert "Empfohlener redaktioneller Inhalt" not in result
+    assert 'href="https://www.youtube.com/watch?v=UIxUUwfWhVo"' in result
+    assert result.index("Vorher") < result.index("youtube.com") < result.index("Mitte")
+    assert result.endswith("<p>Nachher</p>")
+
+
+def test_extract_article_keeps_video_link_in_place() -> None:
+    page = PAGE.replace("</article>", f"{OPT_IN_VIDEO}<p>Schluss.</p></article>")
+    article = extract_article(page, "https://example.org/news/1", "F")
+    assert "Empfohlener redaktioneller Inhalt" not in article.html
+    assert "einverstanden" not in article.html
+    assert "https://www.youtube.com/watch?v=UIxUUwfWhVo" in article.html
+    assert article.html.index("youtube.com") < article.html.index("Schluss.")
+
+
+def test_strip_consent_text_removes_leftover_block() -> None:
+    html = (
+        "<p>A</p><h2>Empfohlener redaktioneller Inhalt</h2>"
+        "<p>Mit Ihrer Zustimmung wird hier ein externer Preisvergleich geladen.</p>"
+        "<p>Ich bin damit einverstanden, dass mir externe Inhalte angezeigt werden. "
+        "Mehr dazu in unserer <a href='x'>Datenschutzerklärung</a>.</p><p>B</p>"
+    )
+    assert strip_consent_text(html) == "<p>A</p><p>B</p>"

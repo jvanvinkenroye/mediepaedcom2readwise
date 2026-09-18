@@ -1,6 +1,7 @@
 """Volltext eines Webartikels mit trafilatura aus der Seite loesen."""
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -17,6 +18,53 @@ BROWSER_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/128.0 Safari/537.36"
 )
 MIN_TEXT_CHARS = 300
+
+# heise (und aehnliche Seiten) kapseln Einbettungen in einen Consent-Platzhalter, der
+# im Lesetext als "Empfohlener redaktioneller Inhalt ..." landet. Das eigentliche
+# Ziel steckt im <noscript>-Fallback als iframe-src.
+_OPT_IN_BLOCK = re.compile(r"<a-opt-in\b.*?</a-opt-in>", re.DOTALL | re.IGNORECASE)
+_IFRAME_SRC = re.compile(r"<a?-?iframe\b[^>]*\bsrc=[\"']([^\"']+)", re.IGNORECASE)
+_YOUTUBE_EMBED = re.compile(
+    r"^(?:https?:)?//(?:www\.)?youtube(?:-nocookie)?\.com/embed/([A-Za-z0-9_-]{6,})"
+)
+_CONSENT_TEXT = re.compile(
+    r"<h\d>\s*Empfohlener redaktioneller Inhalt\s*</h\d>\s*"
+    r"(?:<p>(?:(?!</p>).)*?(?:Zustimmung|einverstanden|Datenschutzerkl)(?:(?!</p>).)*</p>\s*){1,3}",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _embed_link(src: str) -> str | None:
+    """Aus einer iframe-Quelle einen fuer Leser brauchbaren Link machen."""
+    match = _YOUTUBE_EMBED.match(src.strip())
+    if match:
+        return f"https://www.youtube.com/watch?v={match.group(1)}"
+    if src.startswith(("http://", "https://", "//")):
+        return src if "://" in src else f"https:{src}"
+    return None
+
+
+def replace_consent_embeds(page_html: str) -> str:
+    """Consent-Platzhalter durch einen Link auf den eingebetteten Inhalt ersetzen.
+
+    Ohne auffindbare Quelle (z. B. Preisvergleich-Widget) entfaellt der Block.
+    """
+
+    def _substitute(match: re.Match[str]) -> str:
+        block = match.group(0)
+        src = _IFRAME_SRC.search(block)
+        link = _embed_link(src.group(1)) if src else None
+        if not link:
+            return ""
+        label = "YouTube-Video" if "youtube.com" in link else "Eingebetteter Inhalt"
+        return f'<p><a href="{link}">{label}: {link}</a></p>'
+
+    return _OPT_IN_BLOCK.sub(_substitute, page_html)
+
+
+def strip_consent_text(html: str) -> str:
+    """Restliche Consent-Texte entfernen, falls der Platzhalter kein a-opt-in war."""
+    return _CONSENT_TEXT.sub("", html)
 
 
 @dataclass
@@ -52,6 +100,7 @@ def _parse_date(raw: str | None) -> date | None:
 
 
 def _extract_body_html(page_html: str, url: str) -> str:
+    page_html = replace_consent_embeds(page_html)
     body_html = trafilatura.extract(
         page_html,
         url=url,
@@ -69,7 +118,7 @@ def _extract_body_html(page_html: str, url: str) -> str:
         raise ValueError(
             f"trafilatura fand keinen Artikeltext ({text_len} Zeichen) unter {url}"
         )
-    return extract_body(body_html)
+    return strip_consent_text(extract_body(body_html))
 
 
 def _metadata(page_html: str, url: str, fallback_title: str) -> WebArticle:
