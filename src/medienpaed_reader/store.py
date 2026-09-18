@@ -205,6 +205,16 @@ class Store:
         )
         self._conn.commit()
 
+    def reset_pushed(self, source: str, article_id: int) -> None:
+        self._conn.execute(
+            """
+            UPDATE articles SET readwise_pushed_at=NULL, updated_at=?
+            WHERE source=? AND article_id=?
+            """,
+            (_now(), source, article_id),
+        )
+        self._conn.commit()
+
     def pending(self, limit: int) -> list[ArticleRecord]:
         rows = self._conn.execute(
             """

@@ -1,6 +1,7 @@
 """Poll-Durchlauf: Feeds lesen, neue Artikel konvertieren, optional pushen."""
 
 import logging
+import time
 from pathlib import Path
 
 import httpx
@@ -13,7 +14,7 @@ from medienpaed_reader.article_page import (
 from medienpaed_reader.config import Settings
 from medienpaed_reader.feed_source import fetch_feed
 from medienpaed_reader.pdf_convert import PdfConverter
-from medienpaed_reader.readwise import ReadwiseClient
+from medienpaed_reader.readwise import SAVED_USING, ReadwiseClient
 from medienpaed_reader.sources import Source
 from medienpaed_reader.store import ArticleRecord, Store
 from medienpaed_reader.web_extract import fetch_article
@@ -230,3 +231,44 @@ def run_once(
         process_pending(settings, store, client, converter, limit)
     if settings.readwise_push:
         push_unpushed(settings, store)
+
+
+def repush_doi_documents(
+    settings: Settings, store: Store, dry_run: bool = False
+) -> tuple[int, int]:
+    """Von uns angelegte Reader-Dokumente mit doi.org-URL loeschen und neu pushen.
+
+    Fruehere Versionen uebergaben den DOI-Link als URL, wodurch Reader "doi.org"
+    als Quelle anzeigte. Die URL laesst sich per API nicht aendern, nur neu anlegen.
+    Gibt (geloescht, neu gepusht) zurueck.
+    """
+    if not settings.readwise_token:
+        raise RuntimeError("READWISE_TOKEN fehlt")
+    rw = ReadwiseClient(settings.readwise_token)
+    seen: set[str] = set()
+    targets: list[dict] = []
+    for source in settings.sources.values():
+        for doc in rw.list_documents(source.tags[0]):
+            if doc["id"] in seen:
+                continue
+            seen.add(doc["id"])
+            if doc.get("saved_using") == SAVED_USING and "doi.org" in (
+                doc.get("source_url") or ""
+            ):
+                targets.append(doc)
+    log.info("Reader: %d eigene Dokumente mit doi.org-URL", len(targets))
+    if dry_run:
+        for doc in targets:
+            log.info("dry-run: wuerde loeschen %s %s", doc["id"], doc.get("title"))
+        return 0, 0
+
+    deleted = 0
+    for doc in targets:
+        rw.delete_document(doc["id"])
+        deleted += 1
+        time.sleep(1.3)  # 50 Anfragen pro Minute
+    for record in store.done(limit=100_000):
+        if record.readwise_pushed_at:
+            store.reset_pushed(record.source, record.article_id)
+    pushed = push_unpushed(settings, store)
+    return deleted, pushed

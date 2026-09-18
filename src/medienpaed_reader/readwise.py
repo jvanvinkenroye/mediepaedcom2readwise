@@ -6,7 +6,10 @@ from dataclasses import dataclass
 import httpx
 
 READWISE_SAVE_URL = "https://readwise.io/api/v3/save/"
+READWISE_LIST_URL = "https://readwise.io/api/v3/list/"
+READWISE_DELETE_URL = "https://readwise.io/api/v3/delete/{id}/"
 READWISE_AUTH_URL = "https://readwise.io/api/v2/auth/"
+SAVED_USING = "medienpaed-reader"
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +50,7 @@ class ReadwiseClient:
             "location": location,
             "category": "article",
             "should_clean_html": False,
-            "saved_using": "medienpaed-reader",
+            "saved_using": SAVED_USING,
         }
         if author:
             payload["author"] = author
@@ -75,3 +78,27 @@ class ReadwiseClient:
         return SaveResult(
             created=created, document_id=data.get("id"), reader_url=data.get("url")
         )
+
+    def list_documents(self, tag: str) -> list[dict]:
+        """Alle Reader-Dokumente mit einem Tag, ueber alle Seiten hinweg."""
+        docs: list[dict] = []
+        cursor: str | None = None
+        while True:
+            params = {"tag": tag}
+            if cursor:
+                params["pageCursor"] = cursor
+            response = self._client.get(
+                READWISE_LIST_URL, params=params, headers=self._headers
+            )
+            response.raise_for_status()
+            data = response.json()
+            docs.extend(data.get("results", []))
+            cursor = data.get("nextPageCursor")
+            if not cursor:
+                return docs
+
+    def delete_document(self, document_id: str) -> None:
+        response = self._client.delete(
+            READWISE_DELETE_URL.format(id=document_id), headers=self._headers
+        )
+        response.raise_for_status()

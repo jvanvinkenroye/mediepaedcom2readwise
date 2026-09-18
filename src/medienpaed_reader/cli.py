@@ -122,6 +122,23 @@ def push_readwise(
     typer.echo(f"{count} Artikel gepusht.")
 
 
+@app.command("readwise-repush")
+def readwise_repush(
+    dry_run: Annotated[
+        bool, typer.Option(help="Nur anzeigen, nichts loeschen")
+    ] = False,
+    verbose: VerboseOpt = False,
+    quiet: QuietOpt = False,
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Eigene Reader-Dokumente mit doi.org-URL loeschen und neu anlegen."""
+    from medienpaed_reader import pipeline
+
+    settings, store = _setup(verbose, quiet, data_dir)
+    deleted, pushed = pipeline.repush_doi_documents(settings, store, dry_run=dry_run)
+    typer.echo(f"{deleted} geloescht, {pushed} neu gepusht.")
+
+
 @app.command()
 def serve(
     no_poll: Annotated[
