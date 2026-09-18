@@ -7,7 +7,7 @@ Status: `[ ]` offen, `[x]` erledigt.
 
 ## Hoch
 
-- [ ] **Falsches PDF bei mehreren Galleys** (`article_page.py`, `choose_main_pdf`)
+- [x] **Falsches PDF bei mehreren Galleys** (behoben 2026-09-18: alle Galleys laden, groesste Datei behalten) (`article_page.py`, `choose_main_pdf`)
   Die Auswahl der groessten Datei stuetzt sich auf `Content-Length` aus HEAD-Anfragen.
   medienpaed.com liefert den Header nicht, alle Groessen sind 0, der Fallback nimmt den
   ersten Eintrag. Bei Artikel 2665 ist das der Anhang (Galley 1623) statt des
@@ -16,7 +16,7 @@ Status: `[ ]` offen, `[x]` erledigt.
   Dateigroesse vergleichen, oder das Galley-Label "PDF" von der Artikelseite auswerten.
   Danach `reset medienpaed 2665`, neu pushen, falsches Reader-Dokument entfernen.
 
-- [ ] **Eine SQLite-Verbindung ohne Sperre ueber mehrere Threads** (`store.py`, `Store.__init__`)
+- [x] **Eine SQLite-Verbindung ohne Sperre (behoben 2026-09-18: RLock um jede Operation)** ueber mehrere Threads** (`store.py`, `Store.__init__`)
   Verbindung mit `check_same_thread=False`, gleichzeitig genutzt vom Poller-Thread und
   den vier waitress-Threads. Gleichzeitige Cursor fuehren zu `ProgrammingError` oder
   abgebrochenen Feed-Antworten.
@@ -24,7 +24,7 @@ Status: `[ ]` offen, `[x]` erledigt.
 
 ## Mittel
 
-- [ ] **Ein fehlgeschlagener Push stoppt alle folgenden** (`pipeline.py`, `push_unpushed`)
+- [x] **Ein fehlgeschlagener Push stoppt alle folgenden** (behoben 2026-09-18: Fehler pro Artikel, Abbruch nur bei 429) (`pipeline.py`, `push_unpushed`)
   429 oder 5xx von Readwise bricht die Schleife ab, restliche Artikel warten bis zum
   naechsten Poll. Fix: Fehler pro Artikel fangen und loggen wie in `process_pending`.
 

@@ -94,17 +94,26 @@ def sources(
 def reset(
     source: Annotated[str, typer.Argument(help="Quellen-Schluessel, z. B. medienpaed")],
     article_id: Annotated[int, typer.Argument(help="Artikel-ID aus der URL")],
+    readwise: Annotated[
+        bool, typer.Option("--readwise", help="Auch das Reader-Dokument loeschen")
+    ] = False,
     verbose: VerboseOpt = False,
     quiet: QuietOpt = False,
     data_dir: DataDirOpt = None,
 ) -> None:
-    """Fehlgeschlagenen Artikel erneut zur Verarbeitung freigeben."""
-    _, store = _setup(verbose, quiet, data_dir)
-    if store.reset(source, article_id):
-        typer.echo(f"{source}/{article_id} steht wieder auf pending.")
-    else:
+    """Artikel erneut zur Verarbeitung freigeben, optional samt Neu-Push."""
+    from medienpaed_reader import pipeline
+
+    settings, store = _setup(verbose, quiet, data_dir)
+    record = store.get(source, article_id)
+    if record is None:
         typer.echo(f"{source}/{article_id} nicht gefunden.", err=True)
         raise typer.Exit(code=1)
+    if readwise:
+        deleted = pipeline.forget_in_readwise(settings, store, record)
+        typer.echo(f"{deleted} Reader-Dokument(e) geloescht.")
+    store.reset(source, article_id)
+    typer.echo(f"{source}/{article_id} steht wieder auf pending.")
 
 
 @app.command("push-readwise")

@@ -1,4 +1,5 @@
 from datetime import date
+from pathlib import Path
 
 import httpx
 import pytest
@@ -7,6 +8,7 @@ import respx
 from medienpaed_reader.article_page import choose_main_pdf, parse_article_page
 
 LANDING = "https://www.medienpaed.com/article/view/2665"
+PDF_HEADERS = {"content-type": "application/pdf"}
 
 
 def test_parse_article_page_reads_citation_meta(article_html: str) -> None:
@@ -33,23 +35,58 @@ def test_parse_article_page_without_meta_falls_back() -> None:
 @pytest.mark.parametrize(
     ("sizes", "expected"),
     [
-        ({"a": 1000, "b": 9_000_000}, "b"),
-        ({"a": 9_000_000, "b": 1000}, "a"),
-        ({"a": 0, "b": 0}, "a"),
+        ({"anhang": 1_000, "haupt": 9_000}, "haupt"),
+        ({"haupt": 9_000, "anhang": 1_000}, "haupt"),
     ],
 )
 @respx.mock
-def test_choose_main_pdf_prefers_largest(sizes: dict[str, int], expected: str) -> None:
+def test_choose_main_pdf_keeps_largest_download(
+    tmp_path: Path, sizes: dict[str, int], expected: str
+) -> None:
+    # Reihenfolge im Feed ist beliebig; ohne Content-Length entscheidet der Download.
     urls = {name: f"https://example.org/{name}.pdf" for name in sizes}
     for name, size in sizes.items():
-        respx.head(urls[name]).mock(
-            return_value=httpx.Response(200, headers={"content-length": str(size)})
+        respx.get(urls[name]).mock(
+            return_value=httpx.Response(
+                200, content=b"%PDF" + b"x" * size, headers=PDF_HEADERS
+            )
         )
+    target = tmp_path / "pdf" / "2665.pdf"
     with httpx.Client() as client:
-        assert choose_main_pdf(client, list(urls.values())) == urls[expected]
+        chosen = choose_main_pdf(client, list(urls.values()), target)
+    assert chosen == urls[expected]
+    assert target.stat().st_size == sizes[expected] + 4
+    assert sorted(p.name for p in target.parent.iterdir()) == ["2665.pdf"]
 
 
-def test_choose_main_pdf_single_and_empty() -> None:
+@respx.mock
+def test_choose_main_pdf_skips_broken_candidates(tmp_path: Path) -> None:
+    respx.get("https://example.org/a.pdf").mock(return_value=httpx.Response(404))
+    respx.get("https://example.org/b.pdf").mock(
+        return_value=httpx.Response(200, content=b"%PDF-ok", headers=PDF_HEADERS)
+    )
+    target = tmp_path / "x.pdf"
     with httpx.Client() as client:
-        assert choose_main_pdf(client, []) is None
-        assert choose_main_pdf(client, ["x"]) == "x"
+        assert (
+            choose_main_pdf(
+                client,
+                ["https://example.org/a.pdf", "https://example.org/b.pdf"],
+                target,
+            )
+            == "https://example.org/b.pdf"
+        )
+    assert target.read_bytes() == b"%PDF-ok"
+
+
+@respx.mock
+def test_choose_main_pdf_single_and_empty(tmp_path: Path) -> None:
+    respx.get("https://example.org/x.pdf").mock(
+        return_value=httpx.Response(200, content=b"%PDF", headers=PDF_HEADERS)
+    )
+    target = tmp_path / "x.pdf"
+    with httpx.Client() as client:
+        assert choose_main_pdf(client, [], target) is None
+        assert choose_main_pdf(client, ["https://example.org/x.pdf"], target) == (
+            "https://example.org/x.pdf"
+        )
+    assert target.exists()

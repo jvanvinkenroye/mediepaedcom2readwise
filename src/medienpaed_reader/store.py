@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -71,6 +72,9 @@ def _row_to_record(row: sqlite3.Row) -> ArticleRecord:
 class Store:
     def __init__(self, db_path: Path) -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Eine Verbindung fuer Poller- und Web-Threads; SQLite-Cursor sind nicht
+        # thread-sicher, deshalb serialisiert der Lock jeden Zugriff.
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._migrate()
@@ -103,32 +107,35 @@ class Store:
         self._conn.close()
 
     def known_ids(self, source: str) -> set[int]:
-        rows = self._conn.execute(
-            "SELECT article_id FROM articles WHERE source = ?", (source,)
-        ).fetchall()
-        return {row["article_id"] for row in rows}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT article_id FROM articles WHERE source = ?", (source,)
+            ).fetchall()
+            return {row["article_id"] for row in rows}
 
     def get(self, source: str, article_id: int) -> ArticleRecord | None:
-        row = self._conn.execute(
-            "SELECT * FROM articles WHERE source = ? AND article_id = ?",
-            (source, article_id),
-        ).fetchone()
-        return _row_to_record(row) if row else None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM articles WHERE source = ? AND article_id = ?",
+                (source, article_id),
+            ).fetchone()
+            return _row_to_record(row) if row else None
 
     def upsert_pending(
         self, source: str, article_id: int, landing_url: str, title: str
     ) -> None:
-        now = _now()
-        self._conn.execute(
-            """
-            INSERT INTO articles
-                (source, article_id, landing_url, title, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(source, article_id) DO NOTHING
-            """,
-            (source, article_id, landing_url, title, now, now),
-        )
-        self._conn.commit()
+        with self._lock:
+            now = _now()
+            self._conn.execute(
+                """
+                INSERT INTO articles
+                    (source, article_id, landing_url, title, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source, article_id) DO NOTHING
+                """,
+                (source, article_id, landing_url, title, now, now),
+            )
+            self._conn.commit()
 
     def mark_done(
         self,
@@ -144,114 +151,123 @@ class Store:
         pdf_url: str | None,
         html_path: str,
     ) -> None:
-        self._conn.execute(
-            """
-            UPDATE articles SET title=?, authors=?, published=?, doi=?, language=?,
-                abstract=?, pdf_url=?, html_path=?, status='done', last_error=NULL,
-                updated_at=?
-            WHERE source=? AND article_id=?
-            """,
-            (
-                title,
-                json.dumps(authors, ensure_ascii=False),
-                published,
-                doi,
-                language,
-                abstract,
-                pdf_url,
-                html_path,
-                _now(),
-                source,
-                article_id,
-            ),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE articles SET title=?, authors=?, published=?, doi=?, language=?,
+                    abstract=?, pdf_url=?, html_path=?, status='done', last_error=NULL,
+                    updated_at=?
+                WHERE source=? AND article_id=?
+                """,
+                (
+                    title,
+                    json.dumps(authors, ensure_ascii=False),
+                    published,
+                    doi,
+                    language,
+                    abstract,
+                    pdf_url,
+                    html_path,
+                    _now(),
+                    source,
+                    article_id,
+                ),
+            )
+            self._conn.commit()
 
     def mark_failed(
         self, source: str, article_id: int, error: str, max_attempts: int
     ) -> None:
-        record = self.get(source, article_id)
-        attempts = (record.attempts if record else 0) + 1
-        status = "failed" if attempts >= max_attempts else "pending"
-        self._conn.execute(
-            """
-            UPDATE articles SET status=?, attempts=?, last_error=?, updated_at=?
-            WHERE source=? AND article_id=?
-            """,
-            (status, attempts, error[:2000], _now(), source, article_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            record = self.get(source, article_id)
+            attempts = (record.attempts if record else 0) + 1
+            status = "failed" if attempts >= max_attempts else "pending"
+            self._conn.execute(
+                """
+                UPDATE articles SET status=?, attempts=?, last_error=?, updated_at=?
+                WHERE source=? AND article_id=?
+                """,
+                (status, attempts, error[:2000], _now(), source, article_id),
+            )
+            self._conn.commit()
 
     def reset(self, source: str, article_id: int) -> bool:
-        """Artikel erneut zur Verarbeitung freigeben (z. B. PDF nachgereicht)."""
-        cursor = self._conn.execute(
-            """
-            UPDATE articles SET status='pending', attempts=0, last_error=NULL,
-                updated_at=?
-            WHERE source=? AND article_id=?
-            """,
-            (_now(), source, article_id),
-        )
-        self._conn.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            """Artikel erneut zur Verarbeitung freigeben (z. B. PDF nachgereicht)."""
+            cursor = self._conn.execute(
+                """
+                UPDATE articles SET status='pending', attempts=0, last_error=NULL,
+                    updated_at=?
+                WHERE source=? AND article_id=?
+                """,
+                (_now(), source, article_id),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def mark_pushed(self, source: str, article_id: int) -> None:
-        self._conn.execute(
-            """
-            UPDATE articles SET readwise_pushed_at=?, updated_at=?
-            WHERE source=? AND article_id=?
-            """,
-            (_now(), _now(), source, article_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE articles SET readwise_pushed_at=?, updated_at=?
+                WHERE source=? AND article_id=?
+                """,
+                (_now(), _now(), source, article_id),
+            )
+            self._conn.commit()
 
     def reset_pushed(self, source: str, article_id: int) -> None:
-        self._conn.execute(
-            """
-            UPDATE articles SET readwise_pushed_at=NULL, updated_at=?
-            WHERE source=? AND article_id=?
-            """,
-            (_now(), source, article_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE articles SET readwise_pushed_at=NULL, updated_at=?
+                WHERE source=? AND article_id=?
+                """,
+                (_now(), source, article_id),
+            )
+            self._conn.commit()
 
     def pending(self, limit: int) -> list[ArticleRecord]:
-        rows = self._conn.execute(
-            """
-            SELECT * FROM articles WHERE status='pending'
-            ORDER BY source, article_id ASC LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-        return [_row_to_record(r) for r in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM articles WHERE status='pending'
+                ORDER BY source, article_id ASC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [_row_to_record(r) for r in rows]
 
     def done(self, limit: int, source: str | None = None) -> list[ArticleRecord]:
-        where = "status='done'" + (" AND source=?" if source else "")
-        params: tuple = (source, limit) if source else (limit,)
-        rows = self._conn.execute(
-            f"""
-            SELECT * FROM articles WHERE {where}
-            ORDER BY COALESCE(published, '') DESC, article_id DESC LIMIT ?
-            """,
-            params,
-        ).fetchall()
-        return [_row_to_record(r) for r in rows]
+        with self._lock:
+            where = "status='done'" + (" AND source=?" if source else "")
+            params: tuple = (source, limit) if source else (limit,)
+            rows = self._conn.execute(
+                f"""
+                SELECT * FROM articles WHERE {where}
+                ORDER BY COALESCE(published, '') DESC, article_id DESC LIMIT ?
+                """,
+                params,
+            ).fetchall()
+            return [_row_to_record(r) for r in rows]
 
     def unpushed(self) -> list[ArticleRecord]:
-        rows = self._conn.execute(
-            """
-            SELECT * FROM articles
-            WHERE status='done' AND readwise_pushed_at IS NULL
-            ORDER BY source, article_id ASC
-            """
-        ).fetchall()
-        return [_row_to_record(r) for r in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT * FROM articles
+                WHERE status='done' AND readwise_pushed_at IS NULL
+                ORDER BY source, article_id ASC
+                """
+            ).fetchall()
+            return [_row_to_record(r) for r in rows]
 
     def counts(self) -> list[tuple[str, str, int]]:
-        rows = self._conn.execute(
-            """
-            SELECT source, status, COUNT(*) AS n FROM articles
-            GROUP BY source, status ORDER BY source, status
-            """
-        ).fetchall()
-        return [(r["source"], r["status"], r["n"]) for r in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT source, status, COUNT(*) AS n FROM articles
+                GROUP BY source, status ORDER BY source, status
+                """
+            ).fetchall()
+            return [(r["source"], r["status"], r["n"]) for r in rows]

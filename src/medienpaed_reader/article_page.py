@@ -1,10 +1,14 @@
 """Metadaten und PDF-Link aus der OJS-Artikelseite (citation_* Meta-Tags) lesen."""
 
+import logging
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 
 import httpx
 from selectolax.parser import HTMLParser
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -73,27 +77,42 @@ def fetch_article_meta(
     return parse_article_page(article_id, str(response.url), response.text)
 
 
-def choose_main_pdf(client: httpx.Client, pdf_urls: list[str]) -> str | None:
-    """Bei mehreren Galleys das groesste PDF nehmen.
+def choose_main_pdf(
+    client: httpx.Client, pdf_urls: list[str], target_path: Path
+) -> str | None:
+    """Alle PDF-Galleys laden und die groesste Datei als Haupttext behalten.
 
-    OJS listet Anhaenge ebenfalls als citation_pdf_url. Der Hauptbeitrag ist
-    praktisch immer die groesste Datei, deshalb entscheidet Content-Length.
+    OJS listet Anhaenge ebenfalls als citation_pdf_url, in beliebiger Reihenfolge.
+    HEAD-Anfragen liefern bei medienpaed.com keine Content-Length, deshalb entscheidet
+    die tatsaechliche Dateigroesse nach dem Download. Anhaenge sind klein, der
+    Mehraufwand ist gering. Das gewaehlte PDF liegt danach unter target_path.
     """
     if not pdf_urls:
         return None
+    target_path.parent.mkdir(parents=True, exist_ok=True)
     if len(pdf_urls) == 1:
+        download_pdf(client, pdf_urls[0], str(target_path))
         return pdf_urls[0]
 
-    sizes: dict[str, int] = {}
-    for url in pdf_urls:
+    candidates: list[tuple[int, str, Path]] = []
+    for index, url in enumerate(pdf_urls):
+        candidate = target_path.with_suffix(f".{index}.pdf")
         try:
-            head = client.head(url, follow_redirects=True)
-            sizes[url] = int(head.headers.get("content-length", "0"))
-        except (httpx.HTTPError, ValueError):
-            sizes[url] = 0
-    if not any(sizes.values()):
-        return pdf_urls[0]
-    return max(sizes, key=lambda u: sizes[u])
+            download_pdf(client, url, str(candidate))
+        except (httpx.HTTPError, ValueError) as exc:
+            log.warning("PDF-Kandidat %s nicht ladbar: %s", url, exc)
+            candidate.unlink(missing_ok=True)
+            continue
+        candidates.append((candidate.stat().st_size, url, candidate))
+    if not candidates:
+        raise ValueError("Keines der PDF-Galleys war ladbar")
+
+    candidates.sort(reverse=True)
+    _, best_url, best_path = candidates[0]
+    best_path.replace(target_path)
+    for _, _, other in candidates[1:]:
+        other.unlink(missing_ok=True)
+    return best_url
 
 
 def download_pdf(client: httpx.Client, url: str, target_path: str) -> None:

@@ -110,3 +110,12 @@ class ReadwiseClient:
             wait = int(response.headers.get("Retry-After", "60"))
             log.warning("Readwise: Rate-Limit beim Loeschen, warte %ds", wait)
             time.sleep(wait + 1)
+
+    def find_by_url(self, tag: str, url: str) -> list[dict]:
+        """Eigene Dokumente (Tag per API gesetzt) mit genau dieser Quell-URL."""
+        return [
+            doc
+            for doc in self.list_documents(tag)
+            if doc.get("source_url") == url
+            and ((doc.get("tags") or {}).get(tag) or {}).get("type") == "public_api"
+        ]

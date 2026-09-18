@@ -195,7 +195,8 @@ uv run mypy src
 | `push-readwise [--dry-run]` | fertige Artikel an Readwise senden |
 | `mark-known` | aktuelle Feed-Eintraege ueberspringen |
 | `sources` | konfigurierte Quellen und Artikelzaehler anzeigen |
-| `reset <quelle> <id>` | fehlgeschlagenen Artikel erneut freigeben |
+| `reset <quelle> <id> [--readwise]` | Artikel erneut freigeben, mit `--readwise` auch das Reader-Dokument loeschen und neu pushen |
+| `readwise-repush [--dry-run]` | eigene Reader-Dokumente mit doi.org-URL durch Artikel-URL ersetzen |
 
 Alle Kommandos kennen `--verbose`, `--quiet` und `--data-dir`.
 

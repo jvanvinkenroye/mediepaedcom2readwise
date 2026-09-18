@@ -6,11 +6,7 @@ from pathlib import Path
 
 import httpx
 
-from medienpaed_reader.article_page import (
-    choose_main_pdf,
-    download_pdf,
-    fetch_article_meta,
-)
+from medienpaed_reader.article_page import choose_main_pdf, fetch_article_meta
 from medienpaed_reader.config import Settings
 from medienpaed_reader.feed_source import fetch_feed
 from medienpaed_reader.pdf_convert import PdfConverter
@@ -75,15 +71,13 @@ def _process_ojs_article(
     record: ArticleRecord,
 ) -> None:
     meta = fetch_article_meta(client, record.article_id, record.landing_url)
-    pdf_url = choose_main_pdf(client, meta.pdf_urls)
+    pdf_path = settings.pdf_dir / record.source / f"{record.article_id}.pdf"
+    pdf_url = choose_main_pdf(client, meta.pdf_urls, pdf_path)
     if pdf_url is None:
         raise ValueError("Artikelseite enthaelt kein citation_pdf_url")
 
-    pdf_path = settings.pdf_dir / record.source / f"{record.article_id}.pdf"
     html_path = settings.html_dir / record.source / f"{record.article_id}.html"
     md_path = html_path.with_suffix(".md")
-    pdf_path.parent.mkdir(parents=True, exist_ok=True)
-    download_pdf(client, pdf_url, str(pdf_path))
     converter.convert(pdf_path, html_path, md_path)
 
     store.mark_done(
@@ -177,16 +171,36 @@ def push_unpushed(settings: Settings, store: Store, dry_run: bool = False) -> in
             continue
         # Reader zeigt die Domain der URL als Quelle an; mit dem DOI-Link stuende
         # dort "doi.org". Die Artikelseite ist ebenso eindeutig fuer die Deduplizierung.
-        rw.save_html(
-            url=record.landing_url,
-            html=wrap_html(record, source, html),
-            title=record.title,
-            author=", ".join(record.authors) or None,
-            published_date=record.published,
-            tags=source.tags,
-            location=settings.readwise_location,
-            summary=record.abstract,
-        )
+        try:
+            rw.save_html(
+                url=record.landing_url,
+                html=wrap_html(record, source, html),
+                title=record.title,
+                author=", ".join(record.authors) or None,
+                published_date=record.published,
+                tags=source.tags,
+                location=settings.readwise_location,
+                summary=record.abstract,
+            )
+        except httpx.HTTPStatusError as exc:
+            # Fehler pro Artikel isolieren; beim Rate-Limit lohnt kein weiterer Versuch.
+            log.error(
+                "Readwise-Push %s/%d fehlgeschlagen: %s",
+                record.source,
+                record.article_id,
+                exc,
+            )
+            if exc.response.status_code == 429:
+                break
+            continue
+        except httpx.HTTPError as exc:
+            log.error(
+                "Readwise-Push %s/%d Netzwerkfehler: %s",
+                record.source,
+                record.article_id,
+                exc,
+            )
+            continue
         store.mark_pushed(record.source, record.article_id)
         pushed += 1
     return pushed
@@ -277,3 +291,17 @@ def repush_doi_documents(
             store.reset_pushed(record.source, record.article_id)
     pushed = push_unpushed(settings, store)
     return deleted, pushed
+
+
+def forget_in_readwise(settings: Settings, store: Store, record: ArticleRecord) -> int:
+    """Reader-Dokument eines Artikels loeschen und Push-Markierung zuruecksetzen."""
+    if not settings.readwise_token:
+        raise RuntimeError("READWISE_TOKEN fehlt")
+    source = settings.sources[record.source]
+    rw = ReadwiseClient(settings.readwise_token)
+    docs = rw.find_by_url(source.tags[0], record.landing_url)
+    for doc in docs:
+        rw.delete_document(doc["id"])
+        log.info("Reader: geloescht %s", doc.get("title"))
+    store.reset_pushed(record.source, record.article_id)
+    return len(docs)
