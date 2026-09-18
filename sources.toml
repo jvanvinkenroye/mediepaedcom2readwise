@@ -1,0 +1,15 @@
+# Quellen: eine Tabelle pro OJS-Zeitschrift.
+# Der Tabellenname ist der stabile Schluessel (Datenbank, Dateinamen, Readwise-Tag).
+# Optional: readwise_tags = ["..."] (Default: der Schluessel), enabled = false.
+
+[medienpaed]
+name = "MedienPädagogik"
+feed_url = "https://www.medienpaed.com/gateway/plugin/WebFeedGatewayPlugin/rss2"
+homepage = "https://www.medienpaed.com/"
+license = "CC BY 4.0"
+
+[ibis]
+name = "Informatische Bildung in Schulen (IBiS)"
+feed_url = "https://www.informatischebildung.de/index.php/ibis/gateway/plugin/WebFeedGatewayPlugin/rss2"
+homepage = "https://www.informatischebildung.de/index.php/ibis"
+license = "CC BY-NC 4.0"

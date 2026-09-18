@@ -1,7 +1,7 @@
 services:
   medienpaed-reader:
     build: .
-    image: medienpaed-reader:0.1.0
+    image: medienpaed-reader:0.2.0
     container_name: medienpaed-reader
     restart: unless-stopped
     env_file: .env
@@ -11,6 +11,7 @@ services:
       - "${HOST_PORT:-8080}:8080"
     volumes:
       - medienpaed-data:/data
+      - ./sources.toml:/app/sources.toml:ro
     mem_limit: 4g
     cpus: 2.0
     read_only: true

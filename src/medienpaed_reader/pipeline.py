@@ -1,4 +1,4 @@
-"""Poll-Durchlauf: Feed lesen, neue Artikel konvertieren, optional pushen."""
+"""Poll-Durchlauf: Feeds lesen, neue Artikel konvertieren, optional pushen."""
 
 import logging
 from pathlib import Path
@@ -14,6 +14,7 @@ from medienpaed_reader.config import Settings
 from medienpaed_reader.feed_source import fetch_feed
 from medienpaed_reader.pdf_convert import PdfConverter
 from medienpaed_reader.readwise import ReadwiseClient
+from medienpaed_reader.sources import Source
 from medienpaed_reader.store import ArticleRecord, Store
 
 log = logging.getLogger(__name__)
@@ -28,17 +29,24 @@ def make_http_client(settings: Settings) -> httpx.Client:
 
 
 def discover(settings: Settings, store: Store, client: httpx.Client) -> int:
-    """Neue Feed-Eintraege als pending vormerken; gibt Anzahl neuer Artikel zurueck."""
-    entries = fetch_feed(client, settings.feed_url)
-    known = store.known_ids()
-    new = 0
-    for entry in entries:
-        if entry.article_id in known:
+    """Neue Feed-Eintraege aller Quellen als pending vormerken."""
+    total_new = 0
+    for source in settings.sources.values():
+        try:
+            entries = fetch_feed(client, source.feed_url)
+        except httpx.HTTPError as exc:
+            log.error("Feed %s nicht abrufbar: %s", source.key, exc)
             continue
-        store.upsert_pending(entry.article_id, entry.link, entry.title)
-        new += 1
-    log.info("Feed: %d Eintraege, %d neu", len(entries), new)
-    return new
+        known = store.known_ids(source.key)
+        new = 0
+        for entry in entries:
+            if entry.article_id in known:
+                continue
+            store.upsert_pending(source.key, entry.article_id, entry.link, entry.title)
+            new += 1
+        log.info("Feed %s: %d Eintraege, %d neu", source.key, len(entries), new)
+        total_new += new
+    return total_new
 
 
 def process_article(
@@ -53,13 +61,15 @@ def process_article(
     if pdf_url is None:
         raise ValueError("Artikelseite enthaelt kein citation_pdf_url")
 
-    pdf_path = settings.pdf_dir / f"{record.article_id}.pdf"
-    html_path = settings.html_dir / f"{record.article_id}.html"
-    md_path = settings.html_dir / f"{record.article_id}.md"
+    pdf_path = settings.pdf_dir / record.source / f"{record.article_id}.pdf"
+    html_path = settings.html_dir / record.source / f"{record.article_id}.html"
+    md_path = html_path.with_suffix(".md")
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
     download_pdf(client, pdf_url, str(pdf_path))
     converter.convert(pdf_path, html_path, md_path)
 
     store.mark_done(
+        record.source,
         record.article_id,
         title=meta.title,
         authors=meta.authors,
@@ -70,7 +80,7 @@ def process_article(
         pdf_url=pdf_url,
         html_path=str(html_path),
     )
-    log.info("Artikel %d fertig: %s", record.article_id, meta.title)
+    log.info("Artikel %s/%d fertig: %s", record.source, record.article_id, meta.title)
 
 
 def process_pending(
@@ -83,12 +93,23 @@ def process_pending(
     pending = store.pending(limit or settings.max_articles_per_poll)
     done = 0
     for record in pending:
+        if record.source not in settings.sources:
+            log.warning(
+                "Artikel %s/%d: Quelle nicht konfiguriert, uebersprungen",
+                record.source,
+                record.article_id,
+            )
+            continue
         try:
             process_article(settings, store, client, converter, record)
             done += 1
         except Exception as exc:  # noqa: BLE001 - Fehler pro Artikel isolieren
-            log.exception("Artikel %d fehlgeschlagen", record.article_id)
-            store.mark_failed(record.article_id, repr(exc), settings.max_attempts)
+            log.exception(
+                "Artikel %s/%d fehlgeschlagen", record.source, record.article_id
+            )
+            store.mark_failed(
+                record.source, record.article_id, repr(exc), settings.max_attempts
+            )
     return done
 
 
@@ -99,35 +120,47 @@ def push_unpushed(settings: Settings, store: Store, dry_run: bool = False) -> in
     rw = ReadwiseClient(settings.readwise_token)
     pushed = 0
     for record in store.unpushed():
-        if not record.html_path:
+        source = settings.sources.get(record.source)
+        if not record.html_path or source is None:
             continue
         html = Path(record.html_path).read_text(encoding="utf-8")
         if dry_run:
-            log.info("dry-run: wuerde pushen %d %s", record.article_id, record.title)
+            log.info(
+                "dry-run: wuerde pushen %s/%d %s",
+                record.source,
+                record.article_id,
+                record.title,
+            )
             continue
         rw.save_html(
             url=record.doi_url or record.landing_url,
-            html=_wrap_html(record, html),
+            html=wrap_html(record, source, html),
             title=record.title,
             author=", ".join(record.authors) or None,
             published_date=record.published,
-            tags=settings.readwise_tags,
+            tags=source.tags,
             location=settings.readwise_location,
             summary=record.abstract,
         )
-        store.mark_pushed(record.article_id)
+        store.mark_pushed(record.source, record.article_id)
         pushed += 1
     return pushed
 
 
-def _wrap_html(record: ArticleRecord, body: str) -> str:
-    links = [f'<a href="{record.landing_url}">Artikelseite</a>']
+def source_line(record: ArticleRecord, source: Source) -> str:
+    """Kopfzeile mit Quelle und Lizenz, fuer Feed-Items und Readwise."""
+    parts = [f'<a href="{record.landing_url}">Artikelseite</a>']
     if record.doi_url:
-        links.append(f'<a href="{record.doi_url}">DOI</a>')
+        parts.append(f'<a href="{record.doi_url}">DOI</a>')
     if record.pdf_url:
-        links.append(f'<a href="{record.pdf_url}">PDF</a>')
-    header = "<p>" + " · ".join(links) + " · MedienPädagogik, CC BY 4.0</p>"
-    return f"<html><body>{header}{body}</body></html>"
+        parts.append(f'<a href="{record.pdf_url}">PDF</a>')
+    label = source.name + (f", {source.license}" if source.license else "")
+    parts.append(label)
+    return "<p>" + " · ".join(parts) + "</p>"
+
+
+def wrap_html(record: ArticleRecord, source: Source, body: str) -> str:
+    return f"<html><body>{source_line(record, source)}{body}</body></html>"
 
 
 def run_once(

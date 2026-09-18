@@ -1,4 +1,4 @@
-"""Flask-App: Volltext-Feed und Artikelseiten ausliefern."""
+"""Flask-App: Volltext-Feeds und Artikelseiten ausliefern."""
 
 from pathlib import Path
 
@@ -6,6 +6,7 @@ from flask import Flask, Response, abort, render_template
 
 from medienpaed_reader.config import Settings
 from medienpaed_reader.feed_output import build_feed
+from medienpaed_reader.pipeline import source_line
 from medienpaed_reader.store import ArticleRecord, Store
 
 
@@ -19,6 +20,14 @@ def _load_html(record: ArticleRecord) -> str:
 def create_app(settings: Settings, store: Store) -> Flask:
     app = Flask(__name__)
 
+    def _with_source_line(record: ArticleRecord) -> str:
+        source = settings.sources.get(record.source)
+        body = _load_html(record)
+        return source_line(record, source) + body if source and body else body
+
+    def _feed_response(xml: bytes) -> Response:
+        return Response(xml, mimetype="application/rss+xml; charset=utf-8")
+
     @app.get("/healthz")
     def healthz() -> Response:
         return Response("ok", mimetype="text/plain")
@@ -27,19 +36,42 @@ def create_app(settings: Settings, store: Store) -> Flask:
     def feed(secret: str) -> Response:
         if secret != settings.feed_secret:
             abort(404)
-        xml = build_feed(
-            store.done(settings.feed_item_limit),
-            settings.public_base_url,
-            settings.feed_path,
-            _load_html,
+        return _feed_response(
+            build_feed(
+                store.done(settings.feed_item_limit),
+                settings.sources,
+                title=settings.feed_title,
+                public_base_url=settings.public_base_url,
+                feed_path=settings.feed_path,
+                load_html=_with_source_line,
+            )
         )
-        return Response(xml, mimetype="application/rss+xml; charset=utf-8")
 
-    @app.get("/articles/<int:article_id>.html")
-    def article(article_id: int) -> str:
-        record = store.get(article_id)
-        if record is None or record.status != "done":
+    @app.get("/feed/<secret>/<source_key>.xml")
+    def source_feed(secret: str, source_key: str) -> Response:
+        source = settings.sources.get(source_key)
+        if secret != settings.feed_secret or source is None:
             abort(404)
-        return render_template("article.html", record=record, body=_load_html(record))
+        return _feed_response(
+            build_feed(
+                store.done(settings.feed_item_limit, source=source_key),
+                {source_key: source},
+                title=f"{source.name} – Volltext",
+                public_base_url=settings.public_base_url,
+                feed_path=settings.source_feed_path(source_key),
+                load_html=_with_source_line,
+                homepage=source.homepage,
+            )
+        )
+
+    @app.get("/articles/<source_key>/<int:article_id>.html")
+    def article(source_key: str, article_id: int) -> str:
+        record = store.get(source_key, article_id)
+        source = settings.sources.get(source_key)
+        if record is None or record.status != "done" or source is None:
+            abort(404)
+        return render_template(
+            "article.html", record=record, source=source, body=_load_html(record)
+        )
 
     return app

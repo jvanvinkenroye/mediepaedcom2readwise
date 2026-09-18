@@ -1,22 +1,49 @@
 # medienpaed-reader
 
-Volltext-Feed fuer die Zeitschrift [MedienPaedagogik](https://www.medienpaed.com/)
-zum Lesen in Readwise Reader.
+Volltext-Feeds fuer Open-Access-Zeitschriften auf OJS-Basis (Open Journal Systems)
+zum Lesen in Readwise Reader. Vorkonfiguriert sind
+[MedienPaedagogik](https://www.medienpaed.com/) und
+[Informatische Bildung in Schulen (IBiS)](https://www.informatischebildung.de/index.php/ibis).
 
-Der offizielle RSS-Feed verlinkt nur die Artikelseite, der Text steckt im PDF.
-Dieser Dienst pollt den Feed, laedt das Haupt-PDF, wandelt es mit
+Die offiziellen RSS-Feeds verlinken nur die Artikelseite, der Text steckt im PDF.
+Dieser Dienst pollt die Feeds, laedt das Haupt-PDF, wandelt es mit
 [docling](https://github.com/docling-project/docling) in strukturiertes HTML um und
 liefert einen eigenen RSS-Feed mit dem Volltext aus. Optional werden die Artikel
 zusaetzlich direkt per Readwise-Reader-API angelegt.
 
-Alle Beitraege der Zeitschrift stehen unter CC BY 4.0.
+Die Lizenz (z. B. CC BY 4.0, CC BY-NC 4.0) steht pro Quelle in `sources.toml` und
+wird in jedem Volltext als Kopfzeile ausgewiesen.
+
+## Quellen konfigurieren
+
+`sources.toml`, eine Tabelle pro Zeitschrift. Der Tabellenname ist der stabile
+Schluessel fuer Datenbank, Dateinamen, Feed-URL und Readwise-Tag:
+
+```toml
+[ibis]
+name = "Informatische Bildung in Schulen (IBiS)"
+feed_url = "https://www.informatischebildung.de/index.php/ibis/gateway/plugin/WebFeedGatewayPlugin/rss2"
+homepage = "https://www.informatischebildung.de/index.php/ibis"
+license = "CC BY-NC 4.0"
+# readwise_tags = ["informatik"]   # Default: der Schluessel
+# enabled = false
+```
+
+Jede OJS-Instanz mit dem WebFeed-Plugin und `citation_pdf_url`-Meta-Tags auf der
+Artikelseite sollte ohne Codeaenderung funktionieren. Feeds:
+
+| URL | Inhalt |
+|---|---|
+| `/feed/<FEED_SECRET>.xml` | alle Quellen, neueste zuerst |
+| `/feed/<FEED_SECRET>/<schluessel>.xml` | nur eine Quelle |
+| `/articles/<schluessel>/<id>.html` | Volltext-Seite eines Artikels |
 
 ## Funktionsweise
 
 ```mermaid
 flowchart TD
-    subgraph quelle["medienpaed.com (OJS)"]
-        RSS["RSS-Feed rss2<br/>nur Links auf Artikelseiten"]
+    subgraph quelle["OJS-Zeitschriften (medienpaed.com, informatischebildung.de, ...)"]
+        RSS["RSS-Feeds rss2 je Quelle<br/>nur Links auf Artikelseiten"]
         SEITE["Artikelseite<br/>citation_* Meta-Tags"]
         PDF["PDF-Galley<br/>(Haupttext, ggf. Anhang)"]
     end
@@ -24,7 +51,7 @@ flowchart TD
     subgraph container["Docker-Container medienpaed-reader"]
         direction TB
         POLL["Poller<br/>alle 6 h, bei Backlog jede Minute"]
-        DISC["discover<br/>neue Artikel-IDs als pending"]
+        DISC["discover<br/>je Quelle neue Artikel-IDs als pending"]
         META["Metadaten lesen<br/>Titel, Autoren, DOI, Datum"]
         WAHL["Haupt-PDF waehlen<br/>groesste Datei per HEAD"]
         DL["PDF herunterladen"]
@@ -32,13 +59,13 @@ flowchart TD
         CLEAN["HTML bereinigen<br/>Silbentrennung, Seitenzahlen, Icon-Glyphen"]
         DB[("SQLite<br/>articles.sqlite")]
         FS[("Volume /data<br/>pdf/, html/")]
-        WEB["Flask + waitress<br/>Port 8080 -> 8085"]
+        WEB["Flask + waitress<br/>Port 8080"]
         PUSH["Readwise-Push<br/>POST /api/v3/save/ mit html"]
     end
 
     subgraph ziel["Readwise Reader"]
         FEEDABO["Feed-Abo<br/>/feed/&lt;secret&gt;.xml"]
-        API["Dokument im Bereich Feed<br/>Tag medienpaed, URL = DOI"]
+        API["Dokument im Bereich Feed<br/>Tag = Quellen-Schluessel, URL = DOI"]
     end
 
     POLL --> DISC
@@ -77,7 +104,8 @@ bleibt der Artikel pending und wird beim naechsten Lauf erneut versucht, nach
 `MAX_ATTEMPTS` Versuchen wird er als failed markiert.
 
 - Verarbeitete Artikel werden in SQLite (`DATA_DIR/articles.sqlite`) gefuehrt,
-  PDFs und HTML liegen daneben.
+  Schluessel ist (Quelle, Artikel-ID). PDFs und HTML liegen unter
+  `DATA_DIR/pdf/<quelle>/` und `DATA_DIR/html/<quelle>/`.
 - Bei mehreren PDF-Galleys (Haupttext + Anhang) wird die groesste Datei gewaehlt.
 - Fehler werden pro Artikel isoliert, bis zu `MAX_ATTEMPTS` Versuche.
 - Der Feed ist nur unter einem geheimen Pfadsegment erreichbar.
@@ -101,6 +129,9 @@ Erststart: Der Dienst konvertiert die 20 aktuellen Feed-Eintraege
 ```bash
 docker compose run --rm medienpaed-reader medienpaed-reader mark-known
 ```
+
+Eine Datenbank aus Version 0.1 (nur medienpaed) wird beim ersten Start automatisch
+auf das Schema mit Quellen-Schluessel migriert.
 
 Ressourcen: 2 CPU-Kerne und 4 GB RAM reichen. Ein Aufsatz mit 25 Seiten braucht
 auf der CPU etwa eine Minute. Die docling-Modelle werden beim Image-Build geladen,
@@ -139,6 +170,8 @@ uv run mypy src
 | `serve [--no-poll]` | Webserver, pollt im Hintergrund alle `POLL_INTERVAL_SECONDS` |
 | `push-readwise [--dry-run]` | fertige Artikel an Readwise senden |
 | `mark-known` | aktuelle Feed-Eintraege ueberspringen |
+| `sources` | konfigurierte Quellen und Artikelzaehler anzeigen |
+| `reset <quelle> <id>` | fehlgeschlagenen Artikel erneut freigeben |
 
 Alle Kommandos kennen `--verbose`, `--quiet` und `--data-dir`.
 

@@ -25,7 +25,7 @@
     <a href="{{ record.landing_url }}">Artikelseite</a>
     {% if record.doi_url %} · <a href="{{ record.doi_url }}">DOI {{ record.doi }}</a>{% endif %}
     {% if record.pdf_url %} · <a href="{{ record.pdf_url }}">PDF</a>{% endif %}
-    · MedienPädagogik, CC BY 4.0
+    · {{ source.name }}{% if source.license %}, {{ source.license }}{% endif %}
   </p>
 </header>
 <article>

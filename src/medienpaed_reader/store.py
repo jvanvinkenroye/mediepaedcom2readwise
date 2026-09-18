@@ -1,4 +1,4 @@
-"""SQLite-Ablage fuer verarbeitete Artikel."""
+"""SQLite-Ablage fuer verarbeitete Artikel, geschluesselt nach Quelle und ID."""
 
 import json
 import sqlite3
@@ -8,7 +8,8 @@ from pathlib import Path
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles (
-    article_id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    article_id INTEGER NOT NULL,
     landing_url TEXT NOT NULL,
     title TEXT NOT NULL,
     authors TEXT NOT NULL DEFAULT '[]',
@@ -23,13 +24,18 @@ CREATE TABLE IF NOT EXISTS articles (
     last_error TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    readwise_pushed_at TEXT
+    readwise_pushed_at TEXT,
+    PRIMARY KEY (source, article_id)
 );
 """
+
+# Version 1 hatte keinen Quellen-Schluessel; alle Zeilen stammten von medienpaed.
+LEGACY_SOURCE = "medienpaed"
 
 
 @dataclass
 class ArticleRecord:
+    source: str
     article_id: int
     landing_url: str
     title: str
@@ -67,36 +73,66 @@ class Store:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        self._conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        columns = {
+            row["name"]
+            for row in self._conn.execute("PRAGMA table_info(articles)").fetchall()
+        }
+        if columns and "source" not in columns:
+            # Tabelle aus Version 1: Primaerschluessel aendern geht nur per Neuaufbau.
+            self._conn.executescript(
+                "ALTER TABLE articles RENAME TO articles_v1;"
+                + SCHEMA
+                + f"""
+                INSERT INTO articles
+                SELECT '{LEGACY_SOURCE}', article_id, landing_url, title, authors,
+                       published, doi, language, abstract, pdf_url, html_path,
+                       status, attempts, last_error, created_at, updated_at,
+                       readwise_pushed_at
+                FROM articles_v1;
+                DROP TABLE articles_v1;
+                """
+            )
+        else:
+            self._conn.executescript(SCHEMA)
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
 
-    def known_ids(self) -> set[int]:
-        rows = self._conn.execute("SELECT article_id FROM articles").fetchall()
+    def known_ids(self, source: str) -> set[int]:
+        rows = self._conn.execute(
+            "SELECT article_id FROM articles WHERE source = ?", (source,)
+        ).fetchall()
         return {row["article_id"] for row in rows}
 
-    def get(self, article_id: int) -> ArticleRecord | None:
+    def get(self, source: str, article_id: int) -> ArticleRecord | None:
         row = self._conn.execute(
-            "SELECT * FROM articles WHERE article_id = ?", (article_id,)
+            "SELECT * FROM articles WHERE source = ? AND article_id = ?",
+            (source, article_id),
         ).fetchone()
         return _row_to_record(row) if row else None
 
-    def upsert_pending(self, article_id: int, landing_url: str, title: str) -> None:
+    def upsert_pending(
+        self, source: str, article_id: int, landing_url: str, title: str
+    ) -> None:
         now = _now()
         self._conn.execute(
             """
             INSERT INTO articles
-                (article_id, landing_url, title, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(article_id) DO NOTHING
+                (source, article_id, landing_url, title, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(source, article_id) DO NOTHING
             """,
-            (article_id, landing_url, title, now, now),
+            (source, article_id, landing_url, title, now, now),
         )
         self._conn.commit()
 
     def mark_done(
         self,
+        source: str,
         article_id: int,
         *,
         title: str,
@@ -113,7 +149,7 @@ class Store:
             UPDATE articles SET title=?, authors=?, published=?, doi=?, language=?,
                 abstract=?, pdf_url=?, html_path=?, status='done', last_error=NULL,
                 updated_at=?
-            WHERE article_id=?
+            WHERE source=? AND article_id=?
             """,
             (
                 title,
@@ -125,28 +161,47 @@ class Store:
                 pdf_url,
                 html_path,
                 _now(),
+                source,
                 article_id,
             ),
         )
         self._conn.commit()
 
-    def mark_failed(self, article_id: int, error: str, max_attempts: int) -> None:
-        record = self.get(article_id)
+    def mark_failed(
+        self, source: str, article_id: int, error: str, max_attempts: int
+    ) -> None:
+        record = self.get(source, article_id)
         attempts = (record.attempts if record else 0) + 1
         status = "failed" if attempts >= max_attempts else "pending"
         self._conn.execute(
             """
             UPDATE articles SET status=?, attempts=?, last_error=?, updated_at=?
-            WHERE article_id=?
+            WHERE source=? AND article_id=?
             """,
-            (status, attempts, error[:2000], _now(), article_id),
+            (status, attempts, error[:2000], _now(), source, article_id),
         )
         self._conn.commit()
 
-    def mark_pushed(self, article_id: int) -> None:
+    def reset(self, source: str, article_id: int) -> bool:
+        """Artikel erneut zur Verarbeitung freigeben (z. B. PDF nachgereicht)."""
+        cursor = self._conn.execute(
+            """
+            UPDATE articles SET status='pending', attempts=0, last_error=NULL,
+                updated_at=?
+            WHERE source=? AND article_id=?
+            """,
+            (_now(), source, article_id),
+        )
+        self._conn.commit()
+        return cursor.rowcount > 0
+
+    def mark_pushed(self, source: str, article_id: int) -> None:
         self._conn.execute(
-            "UPDATE articles SET readwise_pushed_at=?, updated_at=? WHERE article_id=?",
-            (_now(), _now(), article_id),
+            """
+            UPDATE articles SET readwise_pushed_at=?, updated_at=?
+            WHERE source=? AND article_id=?
+            """,
+            (_now(), _now(), source, article_id),
         )
         self._conn.commit()
 
@@ -154,19 +209,21 @@ class Store:
         rows = self._conn.execute(
             """
             SELECT * FROM articles WHERE status='pending'
-            ORDER BY article_id ASC LIMIT ?
+            ORDER BY source, article_id ASC LIMIT ?
             """,
             (limit,),
         ).fetchall()
         return [_row_to_record(r) for r in rows]
 
-    def done(self, limit: int) -> list[ArticleRecord]:
+    def done(self, limit: int, source: str | None = None) -> list[ArticleRecord]:
+        where = "status='done'" + (" AND source=?" if source else "")
+        params: tuple = (source, limit) if source else (limit,)
         rows = self._conn.execute(
-            """
-            SELECT * FROM articles WHERE status='done'
+            f"""
+            SELECT * FROM articles WHERE {where}
             ORDER BY COALESCE(published, '') DESC, article_id DESC LIMIT ?
             """,
-            (limit,),
+            params,
         ).fetchall()
         return [_row_to_record(r) for r in rows]
 
@@ -175,7 +232,16 @@ class Store:
             """
             SELECT * FROM articles
             WHERE status='done' AND readwise_pushed_at IS NULL
-            ORDER BY article_id ASC
+            ORDER BY source, article_id ASC
             """
         ).fetchall()
         return [_row_to_record(r) for r in rows]
+
+    def counts(self) -> list[tuple[str, str, int]]:
+        rows = self._conn.execute(
+            """
+            SELECT source, status, COUNT(*) AS n FROM articles
+            GROUP BY source, status ORDER BY source, status
+            """
+        ).fetchall()
+        return [(r["source"], r["status"], r["n"]) for r in rows]

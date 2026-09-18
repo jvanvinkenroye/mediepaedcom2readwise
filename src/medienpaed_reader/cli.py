@@ -11,7 +11,7 @@ import typer
 from medienpaed_reader.config import Settings
 from medienpaed_reader.store import Store
 
-app = typer.Typer(help="Volltext-Feed fuer medienpaed.com und Readwise Reader.")
+app = typer.Typer(help="Volltext-Feeds fuer OJS-Zeitschriften und Readwise Reader.")
 
 VerboseOpt = Annotated[bool, typer.Option("--verbose", "-v", help="Debug-Ausgabe")]
 QuietOpt = Annotated[bool, typer.Option("--quiet", "-q", help="Nur Fehler ausgeben")]
@@ -68,8 +68,43 @@ def mark_known(
     with pipeline.make_http_client(settings) as client:
         pipeline.discover(settings, store, client)
     for record in store.pending(limit=1000):
-        store.mark_failed(record.article_id, "uebersprungen (mark-known)", 1)
+        store.mark_failed(
+            record.source, record.article_id, "uebersprungen (mark-known)", 1
+        )
     typer.echo("Feed-Eintraege als bekannt markiert.")
+
+
+@app.command()
+def sources(
+    verbose: VerboseOpt = False,
+    quiet: QuietOpt = False,
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Konfigurierte Quellen und Artikelzaehler anzeigen."""
+    settings, store = _setup(verbose, quiet, data_dir)
+    counts = store.counts()
+    for source in settings.sources.values():
+        typer.echo(f"{source.key}: {source.name} <{source.feed_url}>")
+        for src, status, n in counts:
+            if src == source.key:
+                typer.echo(f"    {status}: {n}")
+
+
+@app.command()
+def reset(
+    source: Annotated[str, typer.Argument(help="Quellen-Schluessel, z. B. medienpaed")],
+    article_id: Annotated[int, typer.Argument(help="Artikel-ID aus der URL")],
+    verbose: VerboseOpt = False,
+    quiet: QuietOpt = False,
+    data_dir: DataDirOpt = None,
+) -> None:
+    """Fehlgeschlagenen Artikel erneut zur Verarbeitung freigeben."""
+    _, store = _setup(verbose, quiet, data_dir)
+    if store.reset(source, article_id):
+        typer.echo(f"{source}/{article_id} steht wieder auf pending.")
+    else:
+        typer.echo(f"{source}/{article_id} nicht gefunden.", err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command("push-readwise")

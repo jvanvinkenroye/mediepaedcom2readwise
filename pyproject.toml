@@ -1,6 +1,6 @@
 [project]
 name = "medienpaed-reader"
-version = "0.1.0"
+version = "0.2.0"
 description = "Volltext-RSS-Feed und Readwise-Push fuer Artikel der Zeitschrift MedienPaedagogik"
 readme = "README.md"
 authors = [
