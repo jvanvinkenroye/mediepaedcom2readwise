@@ -13,13 +13,66 @@ Alle Beitraege der Zeitschrift stehen unter CC BY 4.0.
 
 ## Funktionsweise
 
+```mermaid
+flowchart TD
+    subgraph quelle["medienpaed.com (OJS)"]
+        RSS["RSS-Feed rss2<br/>nur Links auf Artikelseiten"]
+        SEITE["Artikelseite<br/>citation_* Meta-Tags"]
+        PDF["PDF-Galley<br/>(Haupttext, ggf. Anhang)"]
+    end
+
+    subgraph container["Docker-Container medienpaed-reader"]
+        direction TB
+        POLL["Poller<br/>alle 6 h, bei Backlog jede Minute"]
+        DISC["discover<br/>neue Artikel-IDs als pending"]
+        META["Metadaten lesen<br/>Titel, Autoren, DOI, Datum"]
+        WAHL["Haupt-PDF waehlen<br/>groesste Datei per HEAD"]
+        DL["PDF herunterladen"]
+        DOC["docling<br/>CPU, kein OCR, Layout + Tabellen"]
+        CLEAN["HTML bereinigen<br/>Silbentrennung, Seitenzahlen, Icon-Glyphen"]
+        DB[("SQLite<br/>articles.sqlite")]
+        FS[("Volume /data<br/>pdf/, html/")]
+        WEB["Flask + waitress<br/>Port 8080 -> 8085"]
+        PUSH["Readwise-Push<br/>POST /api/v3/save/ mit html"]
+    end
+
+    subgraph ziel["Readwise Reader"]
+        FEEDABO["Feed-Abo<br/>/feed/&lt;secret&gt;.xml"]
+        API["Dokument im Bereich Feed<br/>Tag medienpaed, URL = DOI"]
+    end
+
+    POLL --> DISC
+    DISC -->|GET| RSS
+    DISC --> DB
+    DB -->|pending, max. 5 pro Lauf| META
+    META -->|GET| SEITE
+    META --> WAHL
+    WAHL --> DL
+    DL -->|GET| PDF
+    DL --> FS
+    DL --> DOC
+    DOC --> CLEAN
+    CLEAN --> FS
+    CLEAN -->|status = done| DB
+    DB --> WEB
+    FS --> WEB
+    WEB -->|"RSS 2.0 mit content:encoded<br/>+ /articles/&lt;id&gt;.html"| FEEDABO
+    DB -->|done, noch nicht gepusht| PUSH
+    FS --> PUSH
+    PUSH -->|"201 neu / 200 Duplikat"| API
+    PUSH -->|readwise_pushed_at| DB
+
+    classDef quelle fill:#eef,stroke:#66a
+    classDef ziel fill:#efe,stroke:#6a6
+    classDef store fill:#ffe,stroke:#aa6
+    class RSS,SEITE,PDF quelle
+    class FEEDABO,API ziel
+    class DB,FS store
 ```
-medienpaed rss2 -> Artikelseite (citation_* Meta) -> PDF -> docling (CPU, kein OCR)
-                                                             |
-                     /feed/<secret>.xml  (RSS 2.0, content:encoded = Volltext)
-                     /articles/<id>.html (Volltext-Seite, Ziel des Feed-Links)
-                     optional: POST readwise.io/api/v3/save/ mit html
-```
+
+Fehlerbehandlung: Jeder Artikel wird isoliert verarbeitet. Schlaegt ein Schritt fehl,
+bleibt der Artikel pending und wird beim naechsten Lauf erneut versucht, nach
+`MAX_ATTEMPTS` Versuchen wird er als failed markiert.
 
 - Verarbeitete Artikel werden in SQLite (`DATA_DIR/articles.sqlite`) gefuehrt,
   PDFs und HTML liegen daneben.
