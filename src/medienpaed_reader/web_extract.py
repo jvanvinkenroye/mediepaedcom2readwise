@@ -51,8 +51,7 @@ def _parse_date(raw: str | None) -> date | None:
         return None
 
 
-def extract_article(page_html: str, url: str, fallback_title: str) -> WebArticle:
-    """Lesetext und Metadaten aus dem HTML einer Artikelseite ziehen."""
+def _extract_body_html(page_html: str, url: str) -> str:
     body_html = trafilatura.extract(
         page_html,
         url=url,
@@ -64,26 +63,35 @@ def extract_article(page_html: str, url: str, fallback_title: str) -> WebArticle
         include_comments=False,
         favor_recall=True,
     )
-    text_len = len(
-        trafilatura.extract(page_html, url=url, output_format="txt", fast=True) or ""
-    )
+    text = trafilatura.extract(page_html, url=url, output_format="txt", fast=True)
+    text_len = len(text or "")
     if not body_html or text_len < MIN_TEXT_CHARS:
         raise ValueError(
             f"trafilatura fand keinen Artikeltext ({text_len} Zeichen) unter {url}"
         )
+    return extract_body(body_html)
+
+
+def _metadata(page_html: str, url: str, fallback_title: str) -> WebArticle:
+    """Metadaten der Seite; der Text wird spaeter ergaenzt."""
     meta = trafilatura.extract_metadata(page_html, default_url=url)
-    title = (meta.title if meta and meta.title else None) or fallback_title
+    if meta is None:
+        return WebArticle(title=fallback_title, html="")
     return WebArticle(
-        title=title,
-        html=extract_body(body_html),
-        authors=_split_authors(
-            meta.author if meta else None, meta.sitename if meta else None
-        ),
-        published=_parse_date(meta.date if meta else None),
-        language=None,
-        description=meta.description if meta else None,
-        sitename=meta.sitename if meta else None,
+        title=meta.title or fallback_title,
+        html="",
+        authors=_split_authors(meta.author, meta.sitename),
+        published=_parse_date(meta.date),
+        description=meta.description,
+        sitename=meta.sitename,
     )
+
+
+def extract_article(page_html: str, url: str, fallback_title: str) -> WebArticle:
+    """Lesetext und Metadaten aus dem HTML einer Artikelseite ziehen."""
+    article = _metadata(page_html, url, fallback_title)
+    article.html = _extract_body_html(page_html, url)
+    return article
 
 
 def fetch_article(client: httpx.Client, url: str, fallback_title: str) -> WebArticle:

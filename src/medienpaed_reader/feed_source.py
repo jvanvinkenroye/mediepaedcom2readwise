@@ -32,7 +32,9 @@ def url_article_id(link: str) -> int | None:
     link = link.strip()
     if not link:
         return None
-    return int(hashlib.sha1(link.encode("utf-8")).hexdigest()[:15], 16)
+    return int(
+        hashlib.sha1(link.encode("utf-8"), usedforsecurity=False).hexdigest()[:15], 16
+    )
 
 
 def parse_feed(xml: str | bytes, source_type: str = "ojs") -> list[FeedEntry]:

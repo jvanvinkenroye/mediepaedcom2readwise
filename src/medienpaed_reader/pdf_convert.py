@@ -1,4 +1,7 @@
-"""PDF mit docling in HTML umwandeln (CPU, ohne OCR) und Artefakte bereinigen."""
+"""PDF mit docling in HTML umwandeln (CPU, ohne OCR) und Artefakte bereinigen.
+
+docling wird erst in PdfConverter importiert, damit Tests und CLI ohne torch laden.
+"""
 
 import logging
 import re

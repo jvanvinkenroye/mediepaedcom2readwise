@@ -1,12 +1,13 @@
 """Flask-App: Volltext-Feeds und Artikelseiten ausliefern."""
 
+import hmac
 from pathlib import Path
 
 from flask import Flask, Response, abort, render_template
 
 from medienpaed_reader.config import Settings
 from medienpaed_reader.feed_output import build_feed
-from medienpaed_reader.pipeline import source_line
+from medienpaed_reader.readwise_sync import source_line
 from medienpaed_reader.store import ArticleRecord, Store
 
 
@@ -28,13 +29,16 @@ def create_app(settings: Settings, store: Store) -> Flask:
     def _feed_response(xml: bytes) -> Response:
         return Response(xml, mimetype="application/rss+xml; charset=utf-8")
 
+    def _secret_ok(secret: str) -> bool:
+        return hmac.compare_digest(secret, settings.feed_secret)
+
     @app.get("/healthz")
     def healthz() -> Response:
         return Response("ok", mimetype="text/plain")
 
     @app.get("/feed/<secret>.xml")
     def feed(secret: str) -> Response:
-        if secret != settings.feed_secret:
+        if not _secret_ok(secret):
             abort(404)
         return _feed_response(
             build_feed(
@@ -50,7 +54,7 @@ def create_app(settings: Settings, store: Store) -> Flask:
     @app.get("/feed/<secret>/<source_key>.xml")
     def source_feed(secret: str, source_key: str) -> Response:
         source = settings.sources.get(source_key)
-        if secret != settings.feed_secret or source is None:
+        if not _secret_ok(secret) or source is None:
             abort(404)
         return _feed_response(
             build_feed(

@@ -3,7 +3,8 @@
 Stand: 2026-09-18, Ergebnis einer Code-Analyse (ruff --select ALL, radon, bandit,
 pytest-cov). Testabdeckung 70 %, Wartbarkeitsindex aller Module Stufe A.
 
-Status: `[ ]` offen, `[x]` erledigt.
+Status: `[ ]` offen, `[x]` erledigt. Aufraeumrunde am 2026-09-18: Readwise-Abgleich
+in `readwise_sync.py` ausgelagert, Funktionen aufgeteilt, Punkte unten abgehakt.
 
 ## Hoch
 
@@ -28,10 +29,10 @@ Status: `[ ]` offen, `[x]` erledigt.
   429 oder 5xx von Readwise bricht die Schleife ab, restliche Artikel warten bis zum
   naechsten Poll. Fix: Fehler pro Artikel fangen und loggen wie in `process_pending`.
 
-- [ ] **Feed-Secret-Vergleich mit `!=`** (`web.py`)
+- [x] **Feed-Secret-Vergleich mit `!=`** (`web.py`)
   Fuer LAN-Betrieb unkritisch; sauber ist `hmac.compare_digest`.
 
-- [ ] **`mark-known` missbraucht `mark_failed`** (`cli.py`)
+- [x] **`mark-known` missbraucht `mark_failed`** (`cli.py`)
   Status wird "failed" mit Fehlertext "uebersprungen". Eigener Status "skipped" waere
   ehrlicher und in `sources` getrennt zaehlbar.
 
@@ -42,12 +43,12 @@ Status: `[ ]` offen, `[x]` erledigt.
 
 ## Niedrig
 
-- [ ] `repush_doi_documents` (Komplexitaet 15) und `extract_article` (12) in Auswahl
+- [x] `repush_doi_documents` (Komplexitaet 15) und `extract_article` (12) in Auswahl
   und Ausfuehrung aufteilen.
-- [ ] SHA-1 in `feed_source.py` mit `usedforsecurity=False` kennzeichnen (bandit B324).
-- [ ] Importe innerhalb von Funktionen sind Absicht (CLI ohne torch startbar); Kommentar
+- [x] SHA-1 in `feed_source.py` mit `usedforsecurity=False` kennzeichnen (bandit B324).
+- [x] Importe innerhalb von Funktionen sind Absicht (CLI ohne torch startbar); Kommentar
   am Modulanfang von `cli.py` und `pdf_convert.py` ergaenzen.
-- [ ] `Settings.sources` ist gecacht, Aenderungen an `sources.toml` brauchen einen
+- [x] `Settings.sources` ist gecacht, Aenderungen an `sources.toml` brauchen einen
   Container-Neustart. Im README dokumentieren.
 - [ ] docling-Konverter bleibt nach dem ersten Artikel dauerhaft im Speicher (ca. 2 GB).
   Fuer den 4-GB-Container in Ordnung, bei weiteren Quellen im Blick behalten.

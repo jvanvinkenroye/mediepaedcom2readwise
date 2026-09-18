@@ -1,4 +1,8 @@
-"""Kommandozeile: run-once, serve, push-readwise."""
+"""Kommandozeile: run-once, serve, push-readwise, sources, reset.
+
+Die Pipeline-Module werden erst in den Kommandos importiert: docling zieht torch mit,
+das dauert Sekunden und ist fuer --help, sources oder reset nicht noetig.
+"""
 
 import logging
 import threading
@@ -68,9 +72,7 @@ def mark_known(
     with pipeline.make_http_client(settings) as client:
         pipeline.discover(settings, store, client)
     for record in store.pending(limit=1000):
-        store.mark_failed(
-            record.source, record.article_id, "uebersprungen (mark-known)", 1
-        )
+        store.mark_skipped(record.source, record.article_id, "mark-known")
     typer.echo("Feed-Eintraege als bekannt markiert.")
 
 
@@ -102,7 +104,7 @@ def reset(
     data_dir: DataDirOpt = None,
 ) -> None:
     """Artikel erneut zur Verarbeitung freigeben, optional samt Neu-Push."""
-    from medienpaed_reader import pipeline
+    from medienpaed_reader import readwise_sync
 
     settings, store = _setup(verbose, quiet, data_dir)
     record = store.get(source, article_id)
@@ -110,7 +112,7 @@ def reset(
         typer.echo(f"{source}/{article_id} nicht gefunden.", err=True)
         raise typer.Exit(code=1)
     if readwise:
-        deleted = pipeline.forget_in_readwise(settings, store, record)
+        deleted = readwise_sync.forget_in_readwise(settings, store, record)
         typer.echo(f"{deleted} Reader-Dokument(e) geloescht.")
     store.reset(source, article_id)
     typer.echo(f"{source}/{article_id} steht wieder auf pending.")
@@ -124,10 +126,10 @@ def push_readwise(
     data_dir: DataDirOpt = None,
 ) -> None:
     """Alle fertigen, noch nicht gepushten Artikel an Readwise Reader senden."""
-    from medienpaed_reader import pipeline
+    from medienpaed_reader import readwise_sync
 
     settings, store = _setup(verbose, quiet, data_dir)
-    count = pipeline.push_unpushed(settings, store, dry_run=dry_run)
+    count = readwise_sync.push_unpushed(settings, store, dry_run=dry_run)
     typer.echo(f"{count} Artikel gepusht.")
 
 
@@ -141,10 +143,12 @@ def readwise_repush(
     data_dir: DataDirOpt = None,
 ) -> None:
     """Eigene Reader-Dokumente mit doi.org-URL loeschen und neu anlegen."""
-    from medienpaed_reader import pipeline
+    from medienpaed_reader import readwise_sync
 
     settings, store = _setup(verbose, quiet, data_dir)
-    deleted, pushed = pipeline.repush_doi_documents(settings, store, dry_run=dry_run)
+    deleted, pushed = readwise_sync.repush_doi_documents(
+        settings, store, dry_run=dry_run
+    )
     typer.echo(f"{deleted} geloescht, {pushed} neu gepusht.")
 
 

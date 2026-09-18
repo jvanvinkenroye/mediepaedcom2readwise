@@ -68,6 +68,11 @@ def test_store_lifecycle(tmp_path: Path) -> None:
     assert store.unpushed() == []
     assert ("medienpaed", "done", 1) in store.counts()
 
+    store.mark_skipped("ibis", 1, "mark-known")
+    assert store.get("ibis", 1).status == "skipped"
+    assert store.pending(10) == [] or all(r.source != "ibis" for r in store.pending(10))
+    assert ("ibis", "skipped", 1) in store.counts()
+
 
 def test_migration_from_v1_schema(tmp_path: Path) -> None:
     db = tmp_path / "old.sqlite"

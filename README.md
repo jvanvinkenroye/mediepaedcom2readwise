@@ -30,7 +30,8 @@ license = "CC BY-NC 4.0"
 ```
 
 Jede OJS-Instanz mit dem WebFeed-Plugin und `citation_pdf_url`-Meta-Tags auf der
-Artikelseite sollte ohne Codeaenderung funktionieren.
+Artikelseite sollte ohne Codeaenderung funktionieren. Die Datei wird beim Start
+gelesen; nach Aenderungen den Container neu starten (`docker compose restart`).
 
 ### Quellentyp `web`: Teaser-Feeds als Volltext
 

@@ -191,6 +191,18 @@ class Store:
             )
             self._conn.commit()
 
+    def mark_skipped(self, source: str, article_id: int, reason: str) -> None:
+        """Artikel bewusst nicht verarbeiten (z. B. Altbestand beim Erststart)."""
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE articles SET status='skipped', last_error=?, updated_at=?
+                WHERE source=? AND article_id=?
+                """,
+                (reason, _now(), source, article_id),
+            )
+            self._conn.commit()
+
     def reset(self, source: str, article_id: int) -> bool:
         with self._lock:
             """Artikel erneut zur Verarbeitung freigeben (z. B. PDF nachgereicht)."""

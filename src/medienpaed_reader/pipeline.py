@@ -1,7 +1,8 @@
 """Poll-Durchlauf: Feeds lesen, neue Artikel konvertieren, optional pushen."""
 
 import logging
-import time
+from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import httpx
@@ -10,12 +11,28 @@ from medienpaed_reader.article_page import choose_main_pdf, fetch_article_meta
 from medienpaed_reader.config import Settings
 from medienpaed_reader.feed_source import fetch_feed
 from medienpaed_reader.pdf_convert import PdfConverter
-from medienpaed_reader.readwise import ReadwiseClient
-from medienpaed_reader.sources import Source
+from medienpaed_reader.readwise_sync import push_unpushed
 from medienpaed_reader.store import ArticleRecord, Store
 from medienpaed_reader.web_extract import fetch_article
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ArticlePaths:
+    pdf: Path
+    html: Path
+
+    @property
+    def markdown(self) -> Path:
+        return self.html.with_suffix(".md")
+
+
+def article_paths(settings: Settings, record: ArticleRecord) -> ArticlePaths:
+    return ArticlePaths(
+        pdf=settings.pdf_dir / record.source / f"{record.article_id}.pdf",
+        html=settings.html_dir / record.source / f"{record.article_id}.html",
+    )
 
 
 def make_http_client(settings: Settings) -> httpx.Client:
@@ -36,15 +53,87 @@ def discover(settings: Settings, store: Store, client: httpx.Client) -> int:
             log.error("Feed %s nicht abrufbar: %s", source.key, exc)
             continue
         known = store.known_ids(source.key)
-        new = 0
-        for entry in entries:
-            if entry.article_id in known:
-                continue
+        new_entries = [e for e in entries if e.article_id not in known]
+        for entry in new_entries:
             store.upsert_pending(source.key, entry.article_id, entry.link, entry.title)
-            new += 1
-        log.info("Feed %s: %d Eintraege, %d neu", source.key, len(entries), new)
-        total_new += new
+        log.info(
+            "Feed %s: %d Eintraege, %d neu", source.key, len(entries), len(new_entries)
+        )
+        total_new += len(new_entries)
     return total_new
+
+
+def _finish(
+    store: Store,
+    record: ArticleRecord,
+    *,
+    title: str,
+    authors: list[str],
+    published: date | None,
+    html_path: Path,
+    doi: str | None = None,
+    language: str | None = None,
+    abstract: str | None = None,
+    pdf_url: str | None = None,
+) -> None:
+    store.mark_done(
+        record.source,
+        record.article_id,
+        title=title,
+        authors=authors,
+        published=published.isoformat() if published else None,
+        doi=doi,
+        language=language,
+        abstract=abstract,
+        pdf_url=pdf_url,
+        html_path=str(html_path),
+    )
+    log.info("Artikel %s/%d fertig: %s", record.source, record.article_id, title)
+
+
+def _process_ojs_article(
+    settings: Settings,
+    store: Store,
+    client: httpx.Client,
+    converter: PdfConverter,
+    record: ArticleRecord,
+) -> None:
+    paths = article_paths(settings, record)
+    meta = fetch_article_meta(client, record.article_id, record.landing_url)
+    pdf_url = choose_main_pdf(client, meta.pdf_urls, paths.pdf)
+    if pdf_url is None:
+        raise ValueError("Artikelseite enthaelt kein citation_pdf_url")
+    converter.convert(paths.pdf, paths.html, paths.markdown)
+    _finish(
+        store,
+        record,
+        title=meta.title,
+        authors=meta.authors,
+        published=meta.published,
+        html_path=paths.html,
+        doi=meta.doi,
+        language=meta.language,
+        abstract=meta.abstract,
+        pdf_url=pdf_url,
+    )
+
+
+def _process_web_article(
+    settings: Settings, store: Store, client: httpx.Client, record: ArticleRecord
+) -> None:
+    paths = article_paths(settings, record)
+    article = fetch_article(client, record.landing_url, record.title)
+    paths.html.parent.mkdir(parents=True, exist_ok=True)
+    paths.html.write_text(article.html, encoding="utf-8")
+    _finish(
+        store,
+        record,
+        title=article.title,
+        authors=article.authors,
+        published=article.published,
+        html_path=paths.html,
+        abstract=article.description,
+    )
 
 
 def process_article(
@@ -57,67 +146,10 @@ def process_article(
     source = settings.sources[record.source]
     if source.type == "web":
         _process_web_article(settings, store, client, record)
-    else:
-        if converter is None:
-            raise RuntimeError("PDF-Konverter fehlt fuer OJS-Quelle")
-        _process_ojs_article(settings, store, client, converter, record)
-
-
-def _process_ojs_article(
-    settings: Settings,
-    store: Store,
-    client: httpx.Client,
-    converter: PdfConverter,
-    record: ArticleRecord,
-) -> None:
-    meta = fetch_article_meta(client, record.article_id, record.landing_url)
-    pdf_path = settings.pdf_dir / record.source / f"{record.article_id}.pdf"
-    pdf_url = choose_main_pdf(client, meta.pdf_urls, pdf_path)
-    if pdf_url is None:
-        raise ValueError("Artikelseite enthaelt kein citation_pdf_url")
-
-    html_path = settings.html_dir / record.source / f"{record.article_id}.html"
-    md_path = html_path.with_suffix(".md")
-    converter.convert(pdf_path, html_path, md_path)
-
-    store.mark_done(
-        record.source,
-        record.article_id,
-        title=meta.title,
-        authors=meta.authors,
-        published=meta.published.isoformat() if meta.published else None,
-        doi=meta.doi,
-        language=meta.language,
-        abstract=meta.abstract,
-        pdf_url=pdf_url,
-        html_path=str(html_path),
-    )
-    log.info("Artikel %s/%d fertig: %s", record.source, record.article_id, meta.title)
-
-
-def _process_web_article(
-    settings: Settings, store: Store, client: httpx.Client, record: ArticleRecord
-) -> None:
-    article = fetch_article(client, record.landing_url, record.title)
-    html_path = settings.html_dir / record.source / f"{record.article_id}.html"
-    html_path.parent.mkdir(parents=True, exist_ok=True)
-    html_path.write_text(article.html, encoding="utf-8")
-
-    store.mark_done(
-        record.source,
-        record.article_id,
-        title=article.title,
-        authors=article.authors,
-        published=article.published.isoformat() if article.published else None,
-        doi=None,
-        language=article.language,
-        abstract=article.description,
-        pdf_url=None,
-        html_path=str(html_path),
-    )
-    log.info(
-        "Artikel %s/%d fertig: %s", record.source, record.article_id, article.title
-    )
+        return
+    if converter is None:
+        raise RuntimeError("PDF-Konverter fehlt fuer OJS-Quelle")
+    _process_ojs_article(settings, store, client, converter, record)
 
 
 def process_pending(
@@ -127,9 +159,8 @@ def process_pending(
     converter: PdfConverter | None,
     limit: int | None = None,
 ) -> int:
-    pending = store.pending(limit or settings.max_articles_per_poll)
     done = 0
-    for record in pending:
+    for record in store.pending(limit or settings.max_articles_per_poll):
         if record.source not in settings.sources:
             log.warning(
                 "Artikel %s/%d: Quelle nicht konfiguriert, uebersprungen",
@@ -150,76 +181,9 @@ def process_pending(
     return done
 
 
-def push_unpushed(settings: Settings, store: Store, dry_run: bool = False) -> int:
-    if not settings.readwise_token:
-        log.warning("READWISE_TOKEN fehlt, Push uebersprungen")
-        return 0
-    rw = ReadwiseClient(settings.readwise_token)
-    pushed = 0
-    for record in store.unpushed():
-        source = settings.sources.get(record.source)
-        if not record.html_path or source is None:
-            continue
-        html = Path(record.html_path).read_text(encoding="utf-8")
-        if dry_run:
-            log.info(
-                "dry-run: wuerde pushen %s/%d %s",
-                record.source,
-                record.article_id,
-                record.title,
-            )
-            continue
-        # Reader zeigt die Domain der URL als Quelle an; mit dem DOI-Link stuende
-        # dort "doi.org". Die Artikelseite ist ebenso eindeutig fuer die Deduplizierung.
-        try:
-            rw.save_html(
-                url=record.landing_url,
-                html=wrap_html(record, source, html),
-                title=record.title,
-                author=", ".join(record.authors) or None,
-                published_date=record.published,
-                tags=source.tags,
-                location=settings.readwise_location,
-                summary=record.abstract,
-            )
-        except httpx.HTTPStatusError as exc:
-            # Fehler pro Artikel isolieren; beim Rate-Limit lohnt kein weiterer Versuch.
-            log.error(
-                "Readwise-Push %s/%d fehlgeschlagen: %s",
-                record.source,
-                record.article_id,
-                exc,
-            )
-            if exc.response.status_code == 429:
-                break
-            continue
-        except httpx.HTTPError as exc:
-            log.error(
-                "Readwise-Push %s/%d Netzwerkfehler: %s",
-                record.source,
-                record.article_id,
-                exc,
-            )
-            continue
-        store.mark_pushed(record.source, record.article_id)
-        pushed += 1
-    return pushed
-
-
-def source_line(record: ArticleRecord, source: Source) -> str:
-    """Kopfzeile mit Quelle und Lizenz, fuer Feed-Items und Readwise."""
-    parts = [f'<a href="{record.landing_url}">Artikelseite</a>']
-    if record.doi_url:
-        parts.append(f'<a href="{record.doi_url}">DOI</a>')
-    if record.pdf_url:
-        parts.append(f'<a href="{record.pdf_url}">PDF</a>')
-    label = source.name + (f", {source.license}" if source.license else "")
-    parts.append(label)
-    return "<p>" + " · ".join(parts) + "</p>"
-
-
-def wrap_html(record: ArticleRecord, source: Source, body: str) -> str:
-    return f"<html><body>{source_line(record, source)}{body}</body></html>"
+def _needs_pdf_converter(settings: Settings, store: Store, limit: int) -> bool:
+    sources = (settings.sources.get(r.source) for r in store.pending(limit))
+    return any(source is not None and source.type == "ojs" for source in sources)
 
 
 def run_once(
@@ -230,78 +194,14 @@ def run_once(
     skip_discover: bool = False,
 ) -> None:
     settings.ensure_dirs()
+    batch = limit or settings.max_articles_per_poll
     with make_http_client(settings) as client:
         if not skip_discover:
             discover(settings, store, client)
-        needs_pdf = any(
-            settings.sources.get(r.source) is not None
-            and settings.sources[r.source].type == "ojs"
-            for r in store.pending(limit or settings.max_articles_per_poll)
-        )
-        if converter is None and needs_pdf:
+        if converter is None and _needs_pdf_converter(settings, store, batch):
             converter = PdfConverter(
                 settings.docling_artifacts_path, settings.docling_threads
             )
-        process_pending(settings, store, client, converter, limit)
+        process_pending(settings, store, client, converter, batch)
     if settings.readwise_push:
         push_unpushed(settings, store)
-
-
-def repush_doi_documents(
-    settings: Settings, store: Store, dry_run: bool = False
-) -> tuple[int, int]:
-    """Von uns angelegte Reader-Dokumente mit doi.org-URL loeschen und neu pushen.
-
-    Fruehere Versionen uebergaben den DOI-Link als URL, wodurch Reader "doi.org"
-    als Quelle anzeigte. Die URL laesst sich per API nicht aendern, nur neu anlegen.
-    Gibt (geloescht, neu gepusht) zurueck.
-    """
-    if not settings.readwise_token:
-        raise RuntimeError("READWISE_TOKEN fehlt")
-    rw = ReadwiseClient(settings.readwise_token)
-    seen: set[str] = set()
-    targets: list[dict] = []
-    for source in settings.sources.values():
-        tag = source.tags[0]
-        for doc in rw.list_documents(tag):
-            if doc["id"] in seen:
-                continue
-            seen.add(doc["id"])
-            # Die List-API liefert saved_using nicht zurueck; unser Kennzeichen ist
-            # der per API gesetzte Quellen-Tag zusammen mit der doi.org-URL.
-            tag_info = (doc.get("tags") or {}).get(tag) or {}
-            if tag_info.get("type") == "public_api" and "doi.org" in (
-                doc.get("source_url") or ""
-            ):
-                targets.append(doc)
-    log.info("Reader: %d eigene Dokumente mit doi.org-URL", len(targets))
-    if dry_run:
-        for doc in targets:
-            log.info("dry-run: wuerde loeschen %s %s", doc["id"], doc.get("title"))
-        return 0, 0
-
-    deleted = 0
-    for doc in targets:
-        rw.delete_document(doc["id"])
-        deleted += 1
-        log.info("Reader: geloescht %s", doc.get("title"))
-        time.sleep(3.1)  # Delete-Endpunkt: 20 Anfragen pro Minute
-    for record in store.done(limit=100_000):
-        if record.readwise_pushed_at:
-            store.reset_pushed(record.source, record.article_id)
-    pushed = push_unpushed(settings, store)
-    return deleted, pushed
-
-
-def forget_in_readwise(settings: Settings, store: Store, record: ArticleRecord) -> int:
-    """Reader-Dokument eines Artikels loeschen und Push-Markierung zuruecksetzen."""
-    if not settings.readwise_token:
-        raise RuntimeError("READWISE_TOKEN fehlt")
-    source = settings.sources[record.source]
-    rw = ReadwiseClient(settings.readwise_token)
-    docs = rw.find_by_url(source.tags[0], record.landing_url)
-    for doc in docs:
-        rw.delete_document(doc["id"])
-        log.info("Reader: geloescht %s", doc.get("title"))
-    store.reset_pushed(record.source, record.article_id)
-    return len(docs)

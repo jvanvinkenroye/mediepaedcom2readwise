@@ -3,7 +3,7 @@ from pathlib import Path
 import httpx
 import respx
 
-from medienpaed_reader import pipeline
+from medienpaed_reader import readwise_sync
 from medienpaed_reader.config import Settings
 from medienpaed_reader.readwise import (
     READWISE_DELETE_URL,
@@ -72,8 +72,8 @@ def test_repush_deletes_only_own_doi_documents(tmp_path: Path) -> None:
         return_value=httpx.Response(201, json={"id": "new"})
     )
 
-    pipeline.time.sleep = lambda _s: None  # type: ignore[assignment]
-    deleted, pushed = pipeline.repush_doi_documents(settings, store)
+    readwise_sync.time.sleep = lambda _s: None  # type: ignore[assignment]
+    deleted, pushed = readwise_sync.repush_doi_documents(settings, store)
 
     assert (deleted, pushed) == (1, 1)
     assert delete_route.called

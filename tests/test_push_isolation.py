@@ -3,7 +3,7 @@ from pathlib import Path
 import httpx
 import respx
 
-from medienpaed_reader import pipeline
+from medienpaed_reader import readwise_sync
 from medienpaed_reader.config import Settings
 from medienpaed_reader.readwise import READWISE_SAVE_URL
 from medienpaed_reader.store import Store
@@ -51,7 +51,7 @@ def test_failed_push_does_not_block_following_articles(tmp_path: Path) -> None:
     )
     respx.post(READWISE_SAVE_URL).mock(side_effect=lambda request: next(responses))
 
-    assert pipeline.push_unpushed(settings, store) == 2
+    assert readwise_sync.push_unpushed(settings, store) == 2
     assert [r.article_id for r in store.unpushed()] == [1]
 
 
@@ -65,6 +65,6 @@ def test_rate_limit_stops_batch_but_keeps_state(tmp_path: Path) -> None:
         return_value=httpx.Response(429, headers={"Retry-After": "30"})
     )
 
-    assert pipeline.push_unpushed(settings, store) == 0
+    assert readwise_sync.push_unpushed(settings, store) == 0
     assert route.call_count == 1
     assert len(store.unpushed()) == 2
