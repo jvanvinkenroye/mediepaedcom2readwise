@@ -270,7 +270,8 @@ def repush_doi_documents(
     for doc in targets:
         rw.delete_document(doc["id"])
         deleted += 1
-        time.sleep(1.3)  # 50 Anfragen pro Minute
+        log.info("Reader: geloescht %s", doc.get("title"))
+        time.sleep(3.1)  # Delete-Endpunkt: 20 Anfragen pro Minute
     for record in store.done(limit=100_000):
         if record.readwise_pushed_at:
             store.reset_pushed(record.source, record.article_id)

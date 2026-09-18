@@ -1,6 +1,7 @@
 """Optionaler Push in Readwise Reader ueber die v3-API."""
 
 import logging
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -97,8 +98,15 @@ class ReadwiseClient:
             if not cursor:
                 return docs
 
-    def delete_document(self, document_id: str) -> None:
-        response = self._client.delete(
-            READWISE_DELETE_URL.format(id=document_id), headers=self._headers
-        )
-        response.raise_for_status()
+    def delete_document(self, document_id: str, max_retries: int = 5) -> None:
+        """Dokument loeschen; bei 429 nach Retry-After erneut versuchen."""
+        for attempt in range(max_retries + 1):
+            response = self._client.delete(
+                READWISE_DELETE_URL.format(id=document_id), headers=self._headers
+            )
+            if response.status_code != 429 or attempt == max_retries:
+                response.raise_for_status()
+                return
+            wait = int(response.headers.get("Retry-After", "60"))
+            log.warning("Readwise: Rate-Limit beim Loeschen, warte %ds", wait)
+            time.sleep(wait + 1)
