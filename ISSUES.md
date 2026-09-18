@@ -16,7 +16,7 @@ Status: `[ ]` offen, `[x]` erledigt.
   Dateigroesse vergleichen, oder das Galley-Label "PDF" von der Artikelseite auswerten.
   Danach `reset medienpaed 2665`, neu pushen, falsches Reader-Dokument entfernen.
 
-- [x] **Eine SQLite-Verbindung ohne Sperre (behoben 2026-09-18: RLock um jede Operation)** ueber mehrere Threads** (`store.py`, `Store.__init__`)
+- [x] **Eine SQLite-Verbindung ohne Sperre ueber mehrere Threads** (behoben 2026-09-18: RLock um jede Operation) (`store.py`, `Store.__init__`)
   Verbindung mit `check_same_thread=False`, gleichzeitig genutzt vom Poller-Thread und
   den vier waitress-Threads. Gleichzeitige Cursor fuehren zu `ProgrammingError` oder
   abgebrochenen Feed-Antworten.
