@@ -24,4 +24,4 @@ name = "Mac & i"
 feed_url = "https://www.heise.de/mac-and-i/feed.xml"
 homepage = "https://www.heise.de/mac-and-i/"
 license = "Alle Rechte beim Verlag, nur zum privaten Lesen"
-enabled = false
+enabled = true
