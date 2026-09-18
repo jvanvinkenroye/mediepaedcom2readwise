@@ -14,7 +14,7 @@ from medienpaed_reader.article_page import (
 from medienpaed_reader.config import Settings
 from medienpaed_reader.feed_source import fetch_feed
 from medienpaed_reader.pdf_convert import PdfConverter
-from medienpaed_reader.readwise import SAVED_USING, ReadwiseClient
+from medienpaed_reader.readwise import ReadwiseClient
 from medienpaed_reader.sources import Source
 from medienpaed_reader.store import ArticleRecord, Store
 from medienpaed_reader.web_extract import fetch_article
@@ -248,11 +248,15 @@ def repush_doi_documents(
     seen: set[str] = set()
     targets: list[dict] = []
     for source in settings.sources.values():
-        for doc in rw.list_documents(source.tags[0]):
+        tag = source.tags[0]
+        for doc in rw.list_documents(tag):
             if doc["id"] in seen:
                 continue
             seen.add(doc["id"])
-            if doc.get("saved_using") == SAVED_USING and "doi.org" in (
+            # Die List-API liefert saved_using nicht zurueck; unser Kennzeichen ist
+            # der per API gesetzte Quellen-Tag zusammen mit der doi.org-URL.
+            tag_info = (doc.get("tags") or {}).get(tag) or {}
+            if tag_info.get("type") == "public_api" and "doi.org" in (
                 doc.get("source_url") or ""
             ):
                 targets.append(doc)

@@ -13,12 +13,14 @@ from medienpaed_reader.readwise import (
 from medienpaed_reader.store import Store
 
 
-def _doc(doc_id: str, url: str, saved_using: str | None) -> dict:
+def _doc(doc_id: str, url: str, tag_type: str | None) -> dict:
+    tags = {"medienpaed": {"name": "medienpaed", "type": tag_type}} if tag_type else {}
     return {
         "id": doc_id,
         "source_url": url,
-        "saved_using": saved_using,
+        "saved_using": None,
         "title": doc_id,
+        "tags": tags,
     }
 
 
@@ -55,9 +57,9 @@ def test_repush_deletes_only_own_doi_documents(tmp_path: Path) -> None:
             200,
             json={
                 "results": [
-                    _doc("ours-doi", "https://doi.org/10.1/x", "medienpaed-reader"),
-                    _doc("ours-ok", "https://m/article/view/2", "medienpaed-reader"),
-                    _doc("foreign-doi", "https://doi.org/10.9/z", None),
+                    _doc("ours-doi", "https://doi.org/10.1/x", "public_api"),
+                    _doc("ours-ok", "https://m/article/view/2", "public_api"),
+                    _doc("manual-doi", "https://doi.org/10.9/z", "manual"),
                 ],
                 "nextPageCursor": None,
             },
