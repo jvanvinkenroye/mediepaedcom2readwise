@@ -141,7 +141,7 @@ class Store:
         doi: str | None,
         language: str | None,
         abstract: str | None,
-        pdf_url: str,
+        pdf_url: str | None,
         html_path: str,
     ) -> None:
         self._conn.execute(

@@ -6,8 +6,9 @@ from pathlib import Path
 from pydantic import BaseModel, Field, field_validator
 
 DEFAULT_SOURCES_TOML = """\
-# Eine Tabelle pro Zeitschrift. Der Schluessel (z. B. "medienpaed") ist stabil und
+# Eine Tabelle pro Quelle. Der Schluessel (z. B. "medienpaed") ist stabil und
 # landet in Datenbank, Dateinamen und als Readwise-Tag.
+# type = "ojs" (Default, PDF + docling) oder "web" (Artikelseite + trafilatura).
 
 [medienpaed]
 name = "MedienPädagogik"
@@ -17,10 +18,15 @@ license = "CC BY 4.0"
 """
 
 
+SOURCE_TYPES = ("ojs", "web")
+
+
 class Source(BaseModel):
     key: str
     name: str
     feed_url: str
+    # "ojs": PDF ueber citation_pdf_url + docling; "web": Artikelseite + trafilatura
+    type: str = "ojs"
     homepage: str = ""
     license: str = ""
     readwise_tags: list[str] = Field(default_factory=list)
@@ -32,6 +38,15 @@ class Source(BaseModel):
         # Der Schluessel wird zum Verzeichnisnamen und URL-Bestandteil.
         if not value or not all(c.isalnum() or c in "-_" for c in value):
             raise ValueError(f"Ungueltiger Quellen-Schluessel: {value!r}")
+        return value
+
+    @field_validator("type")
+    @classmethod
+    def _type_known(cls, value: str) -> str:
+        if value not in SOURCE_TYPES:
+            raise ValueError(
+                f"Unbekannter Quellentyp {value!r}, erlaubt: {SOURCE_TYPES}"
+            )
         return value
 
     @property

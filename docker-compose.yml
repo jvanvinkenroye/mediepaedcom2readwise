@@ -1,7 +1,7 @@
 services:
   medienpaed-reader:
     build: .
-    image: medienpaed-reader:0.2.0
+    image: medienpaed-reader:0.3.0
     container_name: medienpaed-reader
     restart: unless-stopped
     env_file: .env

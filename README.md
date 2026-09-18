@@ -30,7 +30,28 @@ license = "CC BY-NC 4.0"
 ```
 
 Jede OJS-Instanz mit dem WebFeed-Plugin und `citation_pdf_url`-Meta-Tags auf der
-Artikelseite sollte ohne Codeaenderung funktionieren. Feeds:
+Artikelseite sollte ohne Codeaenderung funktionieren.
+
+### Quellentyp `web`: Teaser-Feeds als Volltext
+
+Viele Nachrichten- und Blog-Feeds liefern nur einen Anriss. Mit `type = "web"` laedt
+der Dienst stattdessen die verlinkte Artikelseite und zieht den Lesetext mit
+[trafilatura](https://trafilatura.readthedocs.io/) heraus, ohne PDF und docling:
+
+```toml
+[heise-mac-i]
+type = "web"
+name = "Mac & i"
+feed_url = "https://www.heise.de/mac-and-i/feed.xml"
+homepage = "https://www.heise.de/mac-and-i/"
+license = "Alle Rechte beim Verlag, nur zum privaten Lesen"
+```
+
+Grenzen: Paywall-Inhalte und per JavaScript nachgeladene Texte kommen nicht mit.
+Seiten mit weniger als 300 Zeichen Lesetext werden als Fehler gewertet und spaeter
+erneut versucht. Als Kennung dient ein Hash der Artikel-URL.
+
+Feeds:
 
 | URL | Inhalt |
 |---|---|
@@ -54,6 +75,7 @@ flowchart TD
         DISC["discover<br/>je Quelle neue Artikel-IDs als pending"]
         META["Metadaten lesen<br/>Titel, Autoren, DOI, Datum"]
         WAHL["Haupt-PDF waehlen<br/>groesste Datei per HEAD"]
+        TRAF["trafilatura<br/>Lesetext aus Artikelseite (type = web)"]
         DL["PDF herunterladen"]
         DOC["docling<br/>CPU, kein OCR, Layout + Tabellen"]
         CLEAN["HTML bereinigen<br/>Silbentrennung, Seitenzahlen, Icon-Glyphen"]
@@ -73,7 +95,9 @@ flowchart TD
     DISC --> DB
     DB -->|pending, max. 5 pro Lauf| META
     META -->|GET| SEITE
-    META --> WAHL
+    META -->|type = ojs| WAHL
+    META -->|type = web| TRAF
+    TRAF --> CLEAN
     WAHL --> DL
     DL -->|GET| PDF
     DL --> FS
@@ -93,7 +117,7 @@ flowchart TD
     classDef ziel fill:#c8f0d0,stroke:#2b8a3e,color:#111
     classDef store fill:#ffe8a3,stroke:#b8860b,color:#111
     classDef step fill:#f1f3f5,stroke:#868e96,color:#111
-    class POLL,DISC,META,WAHL,DL,DOC,CLEAN,WEB,PUSH step
+    class POLL,DISC,META,WAHL,TRAF,DL,DOC,CLEAN,WEB,PUSH step
     class RSS,SEITE,PDF quelle
     class FEEDABO,API ziel
     class DB,FS store

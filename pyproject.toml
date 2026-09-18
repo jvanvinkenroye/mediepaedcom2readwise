@@ -1,6 +1,6 @@
 [project]
 name = "medienpaed-reader"
-version = "0.2.0"
+version = "0.3.0"
 description = "Volltext-RSS-Feed und Readwise-Push fuer Artikel der Zeitschrift MedienPaedagogik"
 readme = "README.md"
 authors = [
@@ -17,6 +17,7 @@ dependencies = [
     "selectolax>=0.3",
     "torch>=2.2",
     "torchvision>=0.17",
+    "trafilatura>=2.2.0",
     "typer>=0.12",
     "waitress>=3.0",
 ]

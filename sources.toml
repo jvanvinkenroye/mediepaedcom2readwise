@@ -1,5 +1,7 @@
-# Quellen: eine Tabelle pro OJS-Zeitschrift.
+# Quellen: eine Tabelle pro Feed.
 # Der Tabellenname ist der stabile Schluessel (Datenbank, Dateinamen, Readwise-Tag).
+# type = "ojs" (Default): OJS-Zeitschrift, PDF ueber citation_pdf_url, docling.
+# type = "web": beliebiger Nachrichten-/Blog-Feed, Volltext per trafilatura.
 # Optional: readwise_tags = ["..."] (Default: der Schluessel), enabled = false.
 
 [medienpaed]
@@ -13,3 +15,13 @@ name = "Informatische Bildung in Schulen (IBiS)"
 feed_url = "https://www.informatischebildung.de/index.php/ibis/gateway/plugin/WebFeedGatewayPlugin/rss2"
 homepage = "https://www.informatischebildung.de/index.php/ibis"
 license = "CC BY-NC 4.0"
+
+# Beispiel fuer einen Teaser-Feed, dessen Artikel als Volltext geholt werden.
+# Achtung: Volumen pruefen, der heise-Newsticker liefert Dutzende Artikel pro Tag.
+[heise-mac-i]
+type = "web"
+name = "Mac & i"
+feed_url = "https://www.heise.de/mac-and-i/feed.xml"
+homepage = "https://www.heise.de/mac-and-i/"
+license = "Alle Rechte beim Verlag, nur zum privaten Lesen"
+enabled = false

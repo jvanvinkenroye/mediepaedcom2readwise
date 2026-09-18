@@ -16,6 +16,7 @@ from medienpaed_reader.pdf_convert import PdfConverter
 from medienpaed_reader.readwise import ReadwiseClient
 from medienpaed_reader.sources import Source
 from medienpaed_reader.store import ArticleRecord, Store
+from medienpaed_reader.web_extract import fetch_article
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def discover(settings: Settings, store: Store, client: httpx.Client) -> int:
     total_new = 0
     for source in settings.sources.values():
         try:
-            entries = fetch_feed(client, source.feed_url)
+            entries = fetch_feed(client, source.feed_url, source.type)
         except httpx.HTTPError as exc:
             log.error("Feed %s nicht abrufbar: %s", source.key, exc)
             continue
@@ -50,6 +51,22 @@ def discover(settings: Settings, store: Store, client: httpx.Client) -> int:
 
 
 def process_article(
+    settings: Settings,
+    store: Store,
+    client: httpx.Client,
+    converter: PdfConverter | None,
+    record: ArticleRecord,
+) -> None:
+    source = settings.sources[record.source]
+    if source.type == "web":
+        _process_web_article(settings, store, client, record)
+    else:
+        if converter is None:
+            raise RuntimeError("PDF-Konverter fehlt fuer OJS-Quelle")
+        _process_ojs_article(settings, store, client, converter, record)
+
+
+def _process_ojs_article(
     settings: Settings,
     store: Store,
     client: httpx.Client,
@@ -83,11 +100,36 @@ def process_article(
     log.info("Artikel %s/%d fertig: %s", record.source, record.article_id, meta.title)
 
 
+def _process_web_article(
+    settings: Settings, store: Store, client: httpx.Client, record: ArticleRecord
+) -> None:
+    article = fetch_article(client, record.landing_url, record.title)
+    html_path = settings.html_dir / record.source / f"{record.article_id}.html"
+    html_path.parent.mkdir(parents=True, exist_ok=True)
+    html_path.write_text(article.html, encoding="utf-8")
+
+    store.mark_done(
+        record.source,
+        record.article_id,
+        title=article.title,
+        authors=article.authors,
+        published=article.published.isoformat() if article.published else None,
+        doi=None,
+        language=article.language,
+        abstract=article.description,
+        pdf_url=None,
+        html_path=str(html_path),
+    )
+    log.info(
+        "Artikel %s/%d fertig: %s", record.source, record.article_id, article.title
+    )
+
+
 def process_pending(
     settings: Settings,
     store: Store,
     client: httpx.Client,
-    converter: PdfConverter,
+    converter: PdfConverter | None,
     limit: int | None = None,
 ) -> int:
     pending = store.pending(limit or settings.max_articles_per_poll)
@@ -176,7 +218,12 @@ def run_once(
     with make_http_client(settings) as client:
         if not skip_discover:
             discover(settings, store, client)
-        if converter is None:
+        needs_pdf = any(
+            settings.sources.get(r.source) is not None
+            and settings.sources[r.source].type == "ojs"
+            for r in store.pending(limit or settings.max_articles_per_poll)
+        )
+        if converter is None and needs_pdf:
             converter = PdfConverter(
                 settings.docling_artifacts_path, settings.docling_threads
             )
