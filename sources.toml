@@ -25,3 +25,10 @@ feed_url = "https://www.heise.de/mac-and-i/feed.xml"
 homepage = "https://www.heise.de/mac-and-i/"
 license = "Alle Rechte beim Verlag, nur zum privaten Lesen"
 enabled = true
+
+[heise-make]
+type = "web"
+name = "Make: Hardware-Hacks"
+feed_url = "https://www.heise.de/make/rss/hardware-hacks-atom.xml"
+homepage = "https://www.heise.de/make/"
+license = "Alle Rechte beim Verlag, nur zum privaten Lesen"
