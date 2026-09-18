@@ -5,14 +5,13 @@ das dauert Sekunden und ist fuer --help, sources oder reset nicht noetig.
 """
 
 import logging
-import threading
-import time
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from medienpaed_reader.config import Settings
+from medienpaed_reader.poller import request_wake
 from medienpaed_reader.store import Store
 
 app = typer.Typer(help="Volltext-Feeds fuer OJS-Zeitschriften und Readwise Reader.")
@@ -115,7 +114,8 @@ def reset(
         deleted = readwise_sync.forget_in_readwise(settings, store, record)
         typer.echo(f"{deleted} Reader-Dokument(e) geloescht.")
     store.reset(source, article_id)
-    typer.echo(f"{source}/{article_id} steht wieder auf pending.")
+    request_wake(settings)
+    typer.echo(f"{source}/{article_id} steht wieder auf pending, Poller geweckt.")
 
 
 @app.command("push-readwise")
@@ -171,26 +171,9 @@ def serve(
     log = logging.getLogger("medienpaed_reader.serve")
 
     if not no_poll:
+        from medienpaed_reader.poller import Poller
 
-        def poll_loop() -> None:
-            converter = None
-            while True:
-                try:
-                    if converter is None:
-                        from medienpaed_reader.pdf_convert import PdfConverter
-
-                        converter = PdfConverter(
-                            settings.docling_artifacts_path, settings.docling_threads
-                        )
-                    pipeline.run_once(settings, store, converter=converter)
-                except Exception:  # noqa: BLE001 - Poller darf nicht sterben
-                    log.exception("Poll-Durchlauf fehlgeschlagen")
-                # Solange Artikel ausstehen (z. B. Backlog beim Erststart), nur kurz
-                # warten statt das volle Intervall.
-                backlog = bool(store.pending(limit=1))
-                time.sleep(60 if backlog else settings.poll_interval_seconds)
-
-        threading.Thread(target=poll_loop, name="poller", daemon=True).start()
+        Poller(settings, store, pipeline.run_once).start_thread()
 
     log.info("Feed erreichbar unter %s%s", settings.public_base_url, settings.feed_path)
     waitress_serve(

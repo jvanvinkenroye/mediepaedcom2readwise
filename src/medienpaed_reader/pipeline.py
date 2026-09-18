@@ -192,7 +192,8 @@ def run_once(
     converter: PdfConverter | None = None,
     limit: int | None = None,
     skip_discover: bool = False,
-) -> None:
+) -> PdfConverter | None:
+    """Einen Durchlauf ausfuehren; gibt den (ggf. neu geladenen) Konverter zurueck."""
     settings.ensure_dirs()
     batch = limit or settings.max_articles_per_poll
     with make_http_client(settings) as client:
@@ -205,3 +206,4 @@ def run_once(
         process_pending(settings, store, client, converter, batch)
     if settings.readwise_push:
         push_unpushed(settings, store)
+    return converter

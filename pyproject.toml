@@ -51,6 +51,8 @@ warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: langsame Integrationstests (docling), Aufruf mit -m slow"]
+addopts = "-m 'not slow'"
 
 # Auf Linux (Docker) CPU-only-Torch: spart ueber 3 GB CUDA-Bibliotheken im Image.
 [tool.uv.sources]

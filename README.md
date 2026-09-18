@@ -133,6 +133,8 @@ bleibt der Artikel pending und wird beim naechsten Lauf erneut versucht, nach
   `DATA_DIR/pdf/<quelle>/` und `DATA_DIR/html/<quelle>/`.
 - Bei mehreren PDF-Galleys (Haupttext + Anhang) wird die groesste Datei gewaehlt.
 - Fehler werden pro Artikel isoliert, bis zu `MAX_ATTEMPTS` Versuche.
+- Der Poller wartet in 5-Sekunden-Schritten und startet sofort, wenn `reset` die
+  Marker-Datei `DATA_DIR/wake` anlegt.
 - Der Feed ist nur unter einem geheimen Pfadsegment erreichbar.
 
 ## Betrieb mit Docker
@@ -182,7 +184,8 @@ uv run medienpaed-reader run-once --limit 1 -v
 uv run medienpaed-reader serve --no-poll
 curl localhost:8080/feed/<FEED_SECRET>.xml
 
-uv run pytest
+uv run pytest              # schnelle Tests
+uv run pytest -m slow      # docling-Integrationstest mit tests/fixtures/editorial_2678.pdf
 uv run ruff check src tests
 uv run mypy src
 ```
@@ -196,7 +199,7 @@ uv run mypy src
 | `push-readwise [--dry-run]` | fertige Artikel an Readwise senden |
 | `mark-known` | aktuelle Feed-Eintraege ueberspringen |
 | `sources` | konfigurierte Quellen und Artikelzaehler anzeigen |
-| `reset <quelle> <id> [--readwise]` | Artikel erneut freigeben, mit `--readwise` auch das Reader-Dokument loeschen und neu pushen |
+| `reset <quelle> <id> [--readwise]` | Artikel erneut freigeben und den Poller sofort wecken; mit `--readwise` auch das Reader-Dokument loeschen |
 | `readwise-repush [--dry-run]` | eigene Reader-Dokumente mit doi.org-URL durch Artikel-URL ersetzen |
 
 Alle Kommandos kennen `--verbose`, `--quiet` und `--data-dir`.

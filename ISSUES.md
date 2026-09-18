@@ -1,7 +1,7 @@
 # Offene Punkte
 
 Stand: 2026-09-18, Ergebnis einer Code-Analyse (ruff --select ALL, radon, bandit,
-pytest-cov). Testabdeckung 70 %, Wartbarkeitsindex aller Module Stufe A.
+pytest-cov). Testabdeckung 70 % (nach der Aufraeumrunde 88 %), Wartbarkeitsindex aller Module Stufe A.
 
 Status: `[ ]` offen, `[x]` erledigt. Aufraeumrunde am 2026-09-18: Readwise-Abgleich
 in `readwise_sync.py` ausgelagert, Funktionen aufgeteilt, Punkte unten abgehakt.
@@ -36,10 +36,19 @@ in `readwise_sync.py` ausgelagert, Funktionen aufgeteilt, Punkte unten abgehakt.
   Status wird "failed" mit Fehlertext "uebersprungen". Eigener Status "skipped" waere
   ehrlicher und in `sources` getrennt zaehlbar.
 
-- [ ] **Testluecken**
+- [x] **Testluecken** (2026-09-18: CLI-Tests mit CliRunner, Pipeline-Test mit web-Quelle, docling-Integrationstest unter Marker slow)
   `cli.py` 0 %, `pipeline.py` 48 %, `pdf_convert.convert` ungetestet.
   Fix: Integrationstest mit lokalem Editorial-PDF unter pytest-Marker `slow`,
   CLI-Tests mit `typer.testing.CliRunner`.
+
+- [x] **`reset` stoesst den Poller nicht an** (2026-09-18: Marker-Datei `wake` im
+  Datenverzeichnis, der Poller prueft sie alle 5 Sekunden; `reset` legt sie an)
+  Ein zurueckgesetzter Artikel wartete sonst bis zum naechsten Intervall.
+
+- [ ] **Neu konvertierte Artikel aktualisieren das Reader-Dokument nicht**
+  Readwise erkennt die URL als Duplikat und laesst den Inhalt unveraendert.
+  `reset --readwise` loest das manuell (loeschen, neu anlegen). Automatisch waere
+  ein Vergleich von Inhalts-Hash und Push-Zeitpunkt noetig; Lesestand ginge verloren.
 
 ## Niedrig
 
@@ -51,6 +60,7 @@ in `readwise_sync.py` ausgelagert, Funktionen aufgeteilt, Punkte unten abgehakt.
 - [x] `Settings.sources` ist gecacht, Aenderungen an `sources.toml` brauchen einen
   Container-Neustart. Im README dokumentieren.
 - [ ] docling-Konverter bleibt nach dem ersten Artikel dauerhaft im Speicher (ca. 2 GB).
+  Seit 2026-09-18 wird er erst beim ersten OJS-Artikel geladen, nicht mehr beim Start.
   Fuer den 4-GB-Container in Ordnung, bei weiteren Quellen im Blick behalten.
 
 ## Bekannte Einschraenkungen (kein Fehler)
